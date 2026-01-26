@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+
+from dataclasses import dataclass
+import json
+import math
+import tkinter as tk
+from tkinter import Scrollbar, messagebox
+from typing import List
+from float_to_sig import float_to_str_sig
+
+# --- Data structures (for future deserialization) ---
+@dataclass
+class Support:
+    ver: bool
+    hor: bool
+    rot: bool
+    anch: str
+
+@dataclass
+class Point:
+    id: str
+    x: float
+    y: float
+
+@dataclass
+class Line:
+    id: str
+    a: str
+    b: str
+
+@dataclass
+class PointLoad:
+    pt: str
+    Px: str
+    Py: str
+
+@dataclass
+class UniformLoad:
+    l: str
+    qx: str
+    qy: str
+
+# --- Data Utils -------------------------------------
+    
+def bounding_box(points: List[Point]):
+    xs = [p.x for p in points]
+    ys = [p.y for p in points]
+    minx = min(xs)
+    maxx = max(xs)
+    miny = min(ys)
+    maxy = max(ys)
+    return minx, miny, maxx, maxy
+    
+# ----------------------------------------------------
+
+SAMPLE_DATA = """
+{
+    "points": [
+        {"id": "P1", "x": 0, "y": 0 },
+        {"id": "P2", "x": 6000, "y": 0 },
+        {"id": "P3", "x": 3000, "y": 1000 }
+    ],
+    "supports": [
+        { "anch": "P1", "ver": true, "hor": true, "rot": false },
+        { "anch": "P2", "ver": true, "hor": false, "rot": false }
+    ],
+    "lines": [
+        { "id": "L1", "a": "P1", "b": "P2" },
+        { "id": "L2", "a": "P1", "b": "P3" },
+        { "id": "L3", "a": "P2", "b": "P3" }
+    ]
+}
+"""
+
+CANVAS_MARGIN_SIZE = 30
+POINT_DIAMETER = 8
+POINT_RADIUS = POINT_DIAMETER / 2.0
+
+class SimpleApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Text + Canvas Layout")
+
+        # Configure grid: row 0 stretches vertically, column 1 (canvas) stretches horizontally
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+
+        # Left frame with fixed width 200 px for the text widget
+        left_frame = tk.Frame(self, width=200)
+        left_frame.grid(row=0, column=0, sticky="ns")
+        left_frame.grid_propagate(False)  # keep the frame at the specified width
+
+        # Text widget with vertical scrollbar
+        self.text = tk.Text(left_frame, wrap="none")
+        self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        vsb = Scrollbar(left_frame, orient=tk.VERTICAL, command=self.text.yview)
+        self.text.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Right frame that expands (contains the canvas)
+        right_frame = tk.Frame(self)
+        right_frame.grid(row=0, column=1, sticky="nsew")
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
+        # Canvas fills the right frame and resizes with the window
+        self.canvas = tk.Canvas(right_frame, bg="white")
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+
+        # Initialize text box with sample JSON
+        self.text.insert("1.0", SAMPLE_DATA)
+
+        # initial window size
+        self.geometry("1900x700")
+
+        # world to canvas transformation data
+        self.world_origin_x_in_canvas_coordinates = CANVAS_MARGIN_SIZE
+        self.world_origin_y_in_canvas_coordinates = 600 - CANVAS_MARGIN_SIZE
+        self.world_over_canvas_size_ratio: float = 1.0
+
+        # event handlers
+        self.bind("<F5>", self.visualize_data)
+
+    # ------------------------
+    # Utils
+    # ------------------------
+    def canvas_to_world(self, x: float, y: float):
+        wx = (x - self.world_origin_x_in_canvas_coordinates) * self.world_over_canvas_size_ratio
+        wy = (self.world_origin_y_in_canvas_coordinates - y) * self.world_over_canvas_size_ratio
+        return wx, wy
+
+    def world_to_canvas(self, wx: float, wy: float):
+        x = wx / self.world_over_canvas_size_ratio + self.world_origin_x_in_canvas_coordinates
+        y = self.world_origin_y_in_canvas_coordinates - wy / self.world_over_canvas_size_ratio
+        return x, y
+
+    def parse_txt_data(self):
+        txt = self.text.get("1.0", tk.END).strip()
+        if not txt:
+            messagebox.showinfo("No data", "Text box is empty.")
+            return None
+
+        try:
+            data = json.loads(txt)
+        except Exception as e:
+            messagebox.showerror("JSON error", f"Invalid JSON:\n{e}")
+            return None
+
+        if not isinstance(data, dict):
+            messagebox.showerror("Format error", "Root JSON must be an object.")
+            return None
+
+        raw_points = data.get("points")
+        raw_supports = data.get("supports")
+        raw_lines = data.get("lines")
+        if not isinstance(raw_points, list) or not isinstance(raw_supports, list) or not isinstance(raw_lines, list):
+            messagebox.showerror("Format error", "Root object must contain 'points', 'supports' and 'lines' lists.")
+            return None
+
+        # Parse points
+        points: List[Point] = []
+        try:
+            for rp in raw_points:
+                if not isinstance(rp, dict):
+                    raise ValueError("Each point must be an object.")
+                pid = str(rp["id"])
+                x = float(rp["x"])
+                y = float(rp["y"])
+                points.append(Point(id=pid, x=x, y=y))
+        except KeyError as ke:
+            messagebox.showerror("Format error", f"Point missing required property: {ke}")
+            return None
+        except Exception as e:
+            messagebox.showerror("Format error", f"Invalid point data: {e}")
+            return None
+
+        # Parse supports
+        supports: List[Support] = []
+        try:
+            for rs in raw_supports:
+                if not isinstance(rs, dict):
+                    raise ValueError("Each support must be an object.")
+                ver = bool(rs.get("ver", False))
+                hor = bool(rs.get("hor", False))
+                rot = bool(rs.get("rot", False))
+                anch = str(rs.get("anch", ""))
+                supports.append(Support(ver=ver, hor=hor, rot=rot, anch=anch))
+        except Exception as e:
+            messagebox.showerror("Format error", f"Invalid support data: {e}")
+            return None
+
+        # Parse lines
+        lines: List[Line] = []
+        try:
+            for rl in raw_lines:
+                if not isinstance(rl, dict):
+                    raise ValueError("Each line must be an object.")
+                lid = str(rl["id"])
+                a = str(rl["a"])
+                b = str(rl["b"])
+                lines.append(Line(id=lid, a=a, b=b))
+        except KeyError as ke:
+            messagebox.showerror("Format error", f"Line missing required property: {ke}")
+            return None
+        except Exception as e:
+            messagebox.showerror("Format error", f"Invalid line data: {e}")
+            return None
+        
+        return points, lines, supports
+
+    def update_canvas_transform_to_fit(self, points: List[Point]):
+        self.update_idletasks()
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        
+        # If no points, set a reasonable default transform and return empty mapping
+        if not points:
+            # Keep existing transform but ensure it's reasonable with current canvas size
+            self.world_origin_x_in_canvas_coordinates = CANVAS_MARGIN_SIZE
+            self.world_origin_y_in_canvas_coordinates = ch - CANVAS_MARGIN_SIZE
+            self.world_over_canvas_size_ratio = 1.0
+            return
+
+        minx, miny, maxx, maxy = bounding_box(points)
+
+        bbox_w = maxx - minx
+        bbox_h = maxy - miny
+        # Avoid zero sizes to prevent division by zero
+        if bbox_w <= 0:
+            bbox_w = 1.0
+        if bbox_h <= 0:
+            bbox_h = 1.0
+
+        avail_w = max(1.0, cw - 2 * CANVAS_MARGIN_SIZE)
+        avail_h = max(1.0, ch - 2 * CANVAS_MARGIN_SIZE)
+
+        # world_over_canvas_size_ratio: world units per canvas pixel
+        # We need r such that bbox_w / r <= avail_w  and bbox_h / r <= avail_h
+        # => r >= bbox_w / avail_w and r >= bbox_h / avail_h
+        r_x = bbox_w / avail_w
+        r_y = bbox_h / avail_h
+        r = max(r_x, r_y, 1e-9)  # avoid small numbers
+
+        # used pixel sizes after mapping
+        used_w_pixels = bbox_w / r
+        used_h_pixels = bbox_h / r
+
+        extra_x = (avail_w - used_w_pixels) / 2.0
+        extra_y = (avail_h - used_h_pixels) / 2.0
+
+        # Update transform properties
+        self.world_over_canvas_size_ratio = r
+        self.world_origin_x_in_canvas_coordinates = CANVAS_MARGIN_SIZE + extra_x - (minx / r)
+        self.world_origin_y_in_canvas_coordinates = (maxy / r) + CANVAS_MARGIN_SIZE + extra_y
+
+    def draw_scene(self, points: List[Point], lines: List[Line], supports: List[Support]):
+        # 1) remove anything already in the canvas
+        self.canvas.delete("all")
+
+        # Precompute canvas centers for points using world_to_canvas
+        id_to_canvas = {}
+        max_x = 0 # needed for label manipulation at the end
+        for p in points:
+            cx, cy = self.world_to_canvas(p.x, p.y)
+            id_to_canvas[p.id] = (cx, cy)
+            max_x = max(max_x, cx)
+
+        # 2) Draw lines first so they appear under points
+        for ln in lines:
+            if ln.a not in id_to_canvas or ln.b not in id_to_canvas:
+                messagebox.showinfo("Bad data", "Line connecting to an unknown point.")
+                return
+            x1, y1 = id_to_canvas[ln.a]
+            x2, y2 = id_to_canvas[ln.b]
+            self.canvas.create_line(x1, y1, x2, y2, fill="black", width=1)
+
+            # label near middle with small perpendicular offset
+            mx = (x1 + x2) / 2.0
+            my = (y1 + y2) / 2.0
+            dx = x2 - x1
+            dy = y2 - y1
+            length = math.hypot(dx, dy)
+            if length == 0:
+                offx = 0
+                offy = -8
+            else:
+                offx = -dy / length * 8
+                offy = dx / length * 8
+            self.canvas.create_text(mx + offx, my + offy, text=ln.id, fill="black")
+
+        # 3) Draw supports (triangles) - under corresponding point circles
+        s = 10.0  # side length for triangle
+        h = s * math.sqrt(3) / 2.0
+        for sup in supports:
+            if sup.anch not in id_to_canvas:
+                messagebox.showinfo("Bad data", "support under an unknown point.")
+                return
+            cx, cy = id_to_canvas[sup.anch]
+
+            # top of triangle just below the circle
+            top_y = cy + POINT_RADIUS + 2
+            left_x = cx - s / 2.0
+            right_x = cx + s / 2.0
+            bottom_y = top_y + h
+
+            # color rules
+            ver = bool(sup.ver)
+            hor = bool(sup.hor)
+            rot = bool(sup.rot)
+            if ver and hor and rot:
+                tri_color = "red"
+            elif ver and hor and not rot:
+                tri_color = "blue"
+            elif ver and not hor and not rot:
+                tri_color = "cyan"
+            else:
+                tri_color = "magenta"
+
+            self.canvas.create_polygon(
+                left_x, bottom_y, right_x, bottom_y, cx, top_y,
+                fill=tri_color, outline=tri_color
+            )
+
+        # 4) Draw points (circles) and their labels
+        for p in points:
+            cx, cy = id_to_canvas[p.id]
+            x0 = cx - POINT_RADIUS
+            y0 = cy - POINT_RADIUS
+            x1 = cx + POINT_RADIUS
+            y1 = cy + POINT_RADIUS
+            self.canvas.create_oval(x0, y0, x1, y1, fill="skyblue", outline="black", width=1)
+            lab = f"{p.id}: {float_to_str_sig(p.x, 3)}, {float_to_str_sig(p.y, 3)}"
+            lab_x = cx + POINT_RADIUS + 6 if cx < max_x - 100 else cx + POINT_RADIUS - 100
+            lab_y = cy + POINT_RADIUS + 6
+            self.canvas.create_text(lab_x, lab_y, text=lab, anchor="w", fill="black")
+
+
+    def visualize_data(self, e):
+        points, lines, supports = self.parse_txt_data()
+        self.update_canvas_transform_to_fit(points)
+        self.draw_scene(points, lines, supports)
+
+
+if __name__ == "__main__":
+    app = SimpleApp()
+    app.mainloop()
