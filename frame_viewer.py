@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
 
+# LLM-generated
+# human reviewed
+
 from dataclasses import dataclass
 import json
 import math
 import tkinter as tk
 from tkinter import Scrollbar, messagebox
-from typing import List
+from typing import List, Optional, Tuple
 from float_to_sig import float_to_str_sig
 
 # --- Data structures (for future deserialization) ---
+@dataclass
+class PointLoad:
+    pt: str
+    Px: float
+    Py: float
+
+@dataclass
+class UniformLoad:
+    l: str
+    qx: float
+    qy: float
+
 @dataclass
 class Support:
     ver: bool
@@ -21,24 +36,38 @@ class Point:
     id: str
     x: float
     y: float
+    loads: List[PointLoad]
 
 @dataclass
 class Line:
     id: str
     a: str
     b: str
+    @dataclass
+    class BeamProps:
+        E: float
+        I: float
+        A: float
+    bp: BeamProps
+    ul: UniformLoad
+    @dataclass
+    class PointLoadOnLine:
+        c: float
+        ptl: PointLoad
+    ptl: List[PointLoadOnLine]
+    
+@dataclass
+class BeamMember:
+    line: Line
+    point_a: Point
+    point_b: Point
 
 @dataclass
-class PointLoad:
-    pt: str
-    Px: str
-    Py: str
-
-@dataclass
-class UniformLoad:
-    l: str
-    qx: str
-    qy: str
+class FrameNode:
+    point: Point
+    support: Optional[Support]
+    lines_a: List[Line]
+    lines_b: List[Line]
 
 # --- Data Utils -------------------------------------
     
@@ -50,8 +79,28 @@ def bounding_box(points: List[Point]):
     miny = min(ys)
     maxy = max(ys)
     return minx, miny, maxx, maxy
+
+def build_wrappers(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[FrameNode], List[BeamMember]]:
+    # Create lookup dicts
+    point_dict = {p.id: p for p in points}
+    support_dict = {s.anch: s for s in supports}
     
-# ----------------------------------------------------
+    # Build FrameNodes
+    frame_nodes = []
+    for p in points:
+        supp = support_dict.get(p.id)
+        lines_a = [l for l in lines if l.a == p.id]
+        lines_b = [l for l in lines if l.b == p.id]
+        frame_nodes.append(FrameNode(point=p, support=supp, lines_a=lines_a, lines_b=lines_b))
+    
+    # Build BeamMembers
+    beam_members = []
+    for l in lines:
+        pa = point_dict[l.a]
+        pb = point_dict[l.b]
+        beam_members.append(BeamMember(line=l, point_a=pa, point_b=pb))
+    
+    return frame_nodes, beam_members
 
 SAMPLE_DATA = """
 {
@@ -71,6 +120,8 @@ SAMPLE_DATA = """
     ]
 }
 """
+    
+# ----------------------------------------------------
 
 CANVAS_MARGIN_SIZE = 30
 POINT_DIAMETER = 8
@@ -121,6 +172,7 @@ class SimpleApp(tk.Tk):
 
         # event handlers
         self.bind("<F5>", self.visualize_data)
+        self.bind("<F9>", self.export_system)
 
     # ------------------------
     # Utils
@@ -340,6 +392,17 @@ class SimpleApp(tk.Tk):
         points, lines, supports = self.parse_txt_data()
         self.update_canvas_transform_to_fit(points)
         self.draw_scene(points, lines, supports)
+
+    def export_system(self, e):
+        points, lines, supports = self.parse_txt_data()
+        A = []
+        b = []
+
+        for p in points:
+            A = A + []
+            
+            
+
 
 
 if __name__ == "__main__":
