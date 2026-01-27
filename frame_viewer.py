@@ -14,13 +14,11 @@ from float_to_sig import float_to_str_sig
 # --- Data structures (for future deserialization) ---
 @dataclass
 class PointLoad:
-    pt: str
     Px: float
     Py: float
 
 @dataclass
 class UniformLoad:
-    l: str
     qx: float
     qy: float
 
