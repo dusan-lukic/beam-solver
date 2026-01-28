@@ -128,6 +128,15 @@ class HydratedLine(EquationsBricklayer):
     def angle_radians(self) -> float:
         return math.atan2(self.y_length(), self.x_length())
 
+    def perp_ul(self) -> float:
+        return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length()
+
+    def perp_ptls(self) -> List[Tuple[float, float]]:
+        l = self.length()
+        sina = self.y_length() / l
+        cosa = self.x_length() / l
+        return ((ptl.c, -ptl.ptl.Px * sina + ptl.ptl.Py * cosa) for ptl in self.line.ptls)
+
 def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
     # variable positions
     next_member_var = 0
@@ -208,8 +217,10 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     # --- Compatibility equations (3 per line) ---
     for hl in hydrated_lines:
-        # joint A rotation
+        l = hl.length()
         flex_rig = hl.line.bp.E * hl.line.bp.I
+        
+        # joint A rotation
         A[eq_idx, hl.point_a.var_ptr + 2] = 1
         A[eq_idx, hl.var_ptr] = -np.sin(hl.angle_radians()) * (hl.length()**2) / 3 / flex_rig
         A[eq_idx, hl.var_ptr + 1] = np.cos(hl.angle_radians()) * (hl.length()**2) / 3 / flex_rig
@@ -218,7 +229,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         A[eq_idx, hl.point_a.var_ptr + 1] = np.cos(hl.angle_radians()) / hl.length()
         A[eq_idx, hl.point_b.var_ptr] = np.sin(hl.angle_radians()) / hl.length()
         A[eq_idx, hl.point_b.var_ptr + 1] = -np.cos(hl.angle_radians()) / hl.length()
-        b[eq_idx] = 0
+        b[eq_idx] = -sum(p*(c**2)*(3*l-c)/6/flex_rig/l for (c, p) in hl.perp_ptls())-hl.perp_ul()*(l**3)/8/flex_rig
         eq_idx += 1 
 
         # joint B rotation
