@@ -52,7 +52,7 @@ class Line:
     class PointLoadOnLine:
         c: float
         ptl: PointLoad
-    ptl: List[PointLoadOnLine]
+    ptls: List[PointLoadOnLine]
 
 # --- Hydrated Data Structures ---
 
@@ -83,6 +83,12 @@ class HydratedPoint(EquationsBricklayer):
         self.sup = sup
         self.lines_a = []
         self.lines_b = []
+    
+    def total_load_x(self) -> float:
+        return sum(load.Px for load in self.point.loads)
+    
+    def total_load_y(self) -> float:
+        return sum(load.Py for load in self.point.loads)
 
 @dataclass
 class HydratedLine(EquationsBricklayer):
@@ -95,6 +101,32 @@ class HydratedLine(EquationsBricklayer):
         self.line = line
         self.point_a = point_a
         self.point_b = point_b
+    
+    def total_load_x(self) -> float:
+        return self.line.ul.qx * self.length() if self.line.ul else 0.0 \
+            + sum(ptl.ptl.Px for ptl in self.line.ptls) if self.line.ptls else 0.0
+    
+    def total_load_y(self) -> float:
+        return self.line.ul.qy * self.length() if self.line.ul else 0.0 \
+            + sum(ptl.ptl.Py for ptl in self.line.ptls) if self.line.ptls else 0.
+    
+    def total_load_moment_wrt_B(self) -> float:
+        return self.line.ul.qx * self.length() * self.y_length() / 2 if self.line.ul else 0.0 \
+            - self.line.ul.qy * self.length() * self.x_length() / 2 if self.line.ul else 0.0 \
+            + sum(ptl.ptl.Px * (1 - ptl.c/self.length()) * self.y_length() for ptl in self.line.ptls) if self.line.ptls else 0.0 \
+            - sum(ptl.ptl.Py * (1 - ptl.c/self.length()) * self.x_length() for ptl in self.line.ptls) if self.line.ptls else 0.0
+    
+    def x_length(self) -> float:
+        return self.point_b.point.x - self.point_a.point.x
+    
+    def y_length(self) -> float:
+        return self.point_b.point.y - self.point_a.point.y
+    
+    def length(self) -> float:
+        return math.sqrt(self.x_length()**2 + self.y_length()**2)
+    
+    def angle_radians(self) -> float:
+        return math.atan2(self.y_length(), self.x_length())
 
 def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
     # variable positions
@@ -126,6 +158,91 @@ def build_hydrated_structures(points: List[Point], lines: List[Line], supports: 
         line_list.append(hl)
     
     return list(point_dict.values()), line_list, support_list
+
+def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[HydratedLine], hydrated_supports: List[HydratedSupport]) -> Tuple:
+    import numpy as np
+    
+    # Calculate total equations and unknowns
+    eqs_cnt = 3 * (len(hydrated_points) + len(hydrated_lines)) \
+        + sum(int(s.support.ver) + int(s.support.hor) + int(s.support.rot) for s in hydrated_supports)
+
+    A = np.zeros((eqs_cnt, eqs_cnt))
+    b = np.zeros(eqs_cnt)
+
+    eq_idx = 0
+    
+    # --- Equilibrium equations (3 per joint) ---
+    for hp in hydrated_points:
+        # F_x balance
+        for m in hp.lines_b:
+            A[eq_idx, m.var_ptr] = 1
+        for m in hp.lines_a:
+            A[eq_idx, m.var_ptr] = -1
+        if (hp.sup and hp.sup.support.hor):
+            A[eq_idx, hp.sup.var_ptr] = 1
+        b[eq_idx] = sum(l.total_load_x() for l in hp.lines_a) + hp.total_load_x()
+        eq_idx += 1
+
+        # F_y balance
+        for m in hp.lines_b:
+            A[eq_idx, m.var_ptr + 1] = 1
+        for m in hp.lines_a:
+            A[eq_idx, m.var_ptr + 1] = -1
+        if (hp.sup and hp.sup.support.ver):
+            A[eq_idx, hp.sup.var_ptr + (1 if hp.sup.support.hor else 0)] = 1
+        b[eq_idx] = sum(l.total_load_y() for l in hp.lines_a) + hp.total_load_y()
+        eq_idx += 1
+
+        # M balance
+        for m in hp.lines_b:
+            A[eq_idx, m.var_ptr + 2] = 1
+        for m in hp.lines_a:
+            A[eq_idx, m.var_ptr] = -m.y_length()
+            A[eq_idx, m.var_ptr + 1] = m.x_length()
+            A[eq_idx, m.var_ptr + 2] = -1
+        if (hp.sup and hp.sup.support.rot):
+            offset = (1 if hp.sup.support.hor else 0) + (1 if hp.sup.support.ver else 0)
+            A[eq_idx, hp.sup.var_ptr + offset] = 1
+        b[eq_idx] = sum(l.total_load_moment_wrt_B() for l in hp.lines_a) # nothing else because point loads on joints don't support moments
+        eq_idx += 1
+    
+    # --- Compatibility equations (3 per line) ---
+    for hl in hydrated_lines:
+        member_idx = hl.var_ptr
+        jp_a = hl.point_a.var_ptr
+        jp_b = hl.point_b.var_ptr
+        
+        for eq_type in range(3):  # 0=dx, 1=dy, 2=dtheta
+            # TODO: Add coefficients from joint displacements at point_a
+            # TODO: Add coefficients from joint displacements at point_b
+            # TODO: Add material and geometric property terms
+            # TODO: Calculate RHS (loads, etc.) for b[eq_idx]
+            
+            eq_idx += 1
+    
+    # --- Support equations ---
+    for hs in hydrated_supports:
+        support_idx = hs.var_ptr
+        jp = hs.point.var_ptr
+        
+        # Vertical support equation
+        if hs.support.ver:
+            # TODO: Set up vertical reaction equation
+            # A[eq_idx, jp + 1] = coefficient for vertical joint displacement
+            # A[eq_idx, support_idx + offset] = coefficient for vertical reaction
+            eq_idx += 1
+        
+        # Horizontal support equation
+        if hs.support.hor:
+            # TODO: Set up horizontal reaction equation
+            eq_idx += 1
+        
+        # Rotational support equation
+        if hs.support.rot:
+            # TODO: Set up moment reaction equation
+            eq_idx += 1
+    
+    return A, b
 
 # --- Data Utils -------------------------------------
     
@@ -431,6 +548,8 @@ class SimpleApp(tk.Tk):
 
     def export_system(self, e):
         points, lines, supports = self.parse_txt_data()
+        hydrated_points, hydrated_lines, hydrated_supports = build_hydrated_structures(points, lines, supports)
+
         A = []
         b = []
 
