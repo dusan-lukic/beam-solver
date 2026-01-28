@@ -208,17 +208,21 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     # --- Compatibility equations (3 per line) ---
     for hl in hydrated_lines:
-        member_idx = hl.var_ptr
-        jp_a = hl.point_a.var_ptr
-        jp_b = hl.point_b.var_ptr
+        # joint A rotation
+        flex_rig = hl.line.bp.E * hl.line.bp.I
+        A[eq_idx, hl.point_a.var_ptr + 2] = 1
+        A[eq_idx, hl.var_ptr] = -np.sin(hl.angle_radians()) * (hl.length()**2) / 3 / flex_rig
+        A[eq_idx, hl.var_ptr + 1] = np.cos(hl.angle_radians()) * (hl.length()**2) / 3 / flex_rig
+        A[eq_idx, hl.var_ptr + 2] = hl.length() / 2 / flex_rig
+        A[eq_idx, hl.point_a.var_ptr] = -np.sin(hl.angle_radians()) / hl.length()
+        A[eq_idx, hl.point_a.var_ptr + 1] = np.cos(hl.angle_radians()) / hl.length()
+        A[eq_idx, hl.point_b.var_ptr] = np.sin(hl.angle_radians()) / hl.length()
+        A[eq_idx, hl.point_b.var_ptr + 1] = -np.cos(hl.angle_radians()) / hl.length()
+        b[eq_idx] = 0
+        eq_idx += 1 
+
+        # joint B rotation
         
-        for eq_type in range(3):  # 0=dx, 1=dy, 2=dtheta
-            # TODO: Add coefficients from joint displacements at point_a
-            # TODO: Add coefficients from joint displacements at point_b
-            # TODO: Add material and geometric property terms
-            # TODO: Calculate RHS (loads, etc.) for b[eq_idx]
-            
-            eq_idx += 1
     
     # --- Support equations ---
     for hs in hydrated_supports:
