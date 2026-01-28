@@ -53,19 +53,72 @@ class Line:
         c: float
         ptl: PointLoad
     ptl: List[PointLoadOnLine]
-    
-@dataclass
-class BeamMember:
-    line: Line
-    point_a: Point
-    point_b: Point
+
+# --- Hydrated Data Structures ---
 
 @dataclass
-class FrameNode:
+class EquationsBricklayer:
+    var_ptr: int
+
+@dataclass
+class HydratedSupport(EquationsBricklayer):
+    support: Support
+    point: 'HydratedPoint'
+    
+    def __init__(self, support: Support, point: 'HydratedPoint', var_ptr: int = 0):
+        super().__init__(var_ptr)
+        self.support = support
+        self.point = point
+
+@dataclass
+class HydratedPoint(EquationsBricklayer):
     point: Point
-    support: Optional[Support]
-    lines_a: List[Line]
-    lines_b: List[Line]
+    sup: Optional['HydratedSupport']
+    lines_a: List['HydratedLine']
+    lines_b: List['HydratedLine']
+    
+    def __init__(self, point: Point, sup: Optional['HydratedSupport'] = None, var_ptr: int = 0):
+        super().__init__(var_ptr)
+        self.point = point
+        self.sup = sup
+        self.lines_a = []
+        self.lines_b = []
+
+@dataclass
+class HydratedLine(EquationsBricklayer):
+    line: Line
+    point_a: HydratedPoint
+    point_b: HydratedPoint
+    
+    def __init__(self, line: Line, point_a: HydratedPoint, point_b: HydratedPoint, var_ptr: int = 0):
+        super().__init__(var_ptr)
+        self.line = line
+        self.point_a = point_a
+        self.point_b = point_b
+
+def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
+    # Create HydratedPoints
+    point_dict = {p.id: HydratedPoint(p) for p in points}
+    
+    # Create HydratedSupports and link to HydratedPoints
+    support_list = []
+    for s in supports:
+        hp = point_dict[s.anch]
+        hs = HydratedSupport(s, hp)
+        hp.sup = hs
+        support_list.append(hs)
+    
+    # Create HydratedLines and link to HydratedPoints
+    line_list = []
+    for l in lines:
+        hp_a = point_dict[l.a]
+        hp_b = point_dict[l.b]
+        hl = HydratedLine(l, hp_a, hp_b)
+        hp_a.lines_a.append(hl)
+        hp_b.lines_b.append(hl)
+        line_list.append(hl)
+    
+    return list(point_dict.values()), line_list, support_list
 
 # --- Data Utils -------------------------------------
     
@@ -77,28 +130,6 @@ def bounding_box(points: List[Point]):
     miny = min(ys)
     maxy = max(ys)
     return minx, miny, maxx, maxy
-
-def build_wrappers(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[FrameNode], List[BeamMember]]:
-    # Create lookup dicts
-    point_dict = {p.id: p for p in points}
-    support_dict = {s.anch: s for s in supports}
-    
-    # Build FrameNodes
-    frame_nodes = []
-    for p in points:
-        supp = support_dict.get(p.id)
-        lines_a = [l for l in lines if l.a == p.id]
-        lines_b = [l for l in lines if l.b == p.id]
-        frame_nodes.append(FrameNode(point=p, support=supp, lines_a=lines_a, lines_b=lines_b))
-    
-    # Build BeamMembers
-    beam_members = []
-    for l in lines:
-        pa = point_dict[l.a]
-        pb = point_dict[l.b]
-        beam_members.append(BeamMember(line=l, point_a=pa, point_b=pb))
-    
-    return frame_nodes, beam_members
 
 SAMPLE_DATA = """
 {
