@@ -90,6 +90,9 @@ class HydratedPoint(EquationsBricklayer):
     def total_load_y(self) -> float:
         return sum(load.Py for load in self.point.loads)
 
+#TODO: document perf optimization oportunities
+#TODO: encapsulate with underscore convention + linter
+#TODO: move solver stuff to a separate module
 @dataclass
 class HydratedLine(EquationsBricklayer):
     line: Line
@@ -127,15 +130,24 @@ class HydratedLine(EquationsBricklayer):
     
     def angle_radians(self) -> float:
         return math.atan2(self.y_length(), self.x_length())
+    
+    def sin_a(self) -> float:
+        return self.y_length() / self.length()
+    
+    def cos_a(self) -> float:
+        return self.x_length() / self.length()
 
     def perp_ul(self) -> float:
         return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length()
+    
+    def ax_ul(self) -> float:
+        return (self.line.ul.qx*self.x_length() + self.line.ul.qy*self.y_length()) / self.length()
 
     def perp_ptls(self) -> List[Tuple[float, float]]:
-        l = self.length()
-        sina = self.y_length() / l
-        cosa = self.x_length() / l
-        return ((ptl.c, -ptl.ptl.Px * sina + ptl.ptl.Py * cosa) for ptl in self.line.ptls)
+        return ((ptl.c, -ptl.ptl.Px * self.sin_a() + ptl.ptl.Py * self.cos_a()) for ptl in self.line.ptls)
+    
+    def ax_ptls(self) -> List[Tuple[float, float]]:
+        return ((ptl.c, ptl.ptl.Px * self.cos_a() + ptl.ptl.Py * self.sin_a()) for ptl in self.line.ptls)
 
 def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
     # variable positions
@@ -219,6 +231,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     for hl in hydrated_lines:
         l = hl.length()
         flex_rig = hl.line.bp.E * hl.line.bp.I
+        AE = hl.line.bp.E * hl.line.bp.A
         
         # joint A rotation
         A[eq_idx, hl.point_a.var_ptr + 2] = 1
@@ -230,9 +243,29 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         A[eq_idx, hl.point_b.var_ptr] = np.sin(hl.angle_radians()) / hl.length()
         A[eq_idx, hl.point_b.var_ptr + 1] = -np.cos(hl.angle_radians()) / hl.length()
         b[eq_idx] = -sum(p*(c**2)*(3*l-c)/6/flex_rig/l for (c, p) in hl.perp_ptls())-hl.perp_ul()*(l**3)/8/flex_rig
-        eq_idx += 1 
+        eq_idx += 1
 
         # joint B rotation
+        A[eq_idx, hl.point_b.var_ptr + 2] = 1
+        A[eq_idx, hl.var_ptr] = np.sin(hl.angle_radians()) * (hl.length()**2) / 6 / flex_rig
+        A[eq_idx, hl.var_ptr + 1] = -np.cos(hl.angle_radians()) * (hl.length()**2) / 6 / flex_rig
+        A[eq_idx, hl.var_ptr + 2] = -hl.length() / 2 / flex_rig
+        A[eq_idx, hl.point_a.var_ptr] = -np.sin(hl.angle_radians()) / hl.length()
+        A[eq_idx, hl.point_a.var_ptr + 1] = np.cos(hl.angle_radians()) / hl.length()
+        A[eq_idx, hl.point_b.var_ptr] = np.sin(hl.angle_radians()) / hl.length()
+        A[eq_idx, hl.point_b.var_ptr + 1] = -np.cos(hl.angle_radians()) / hl.length()
+        b[eq_idx] = sum(p*(c**3)/6/flex_rig/l for (c, p) in hl.perp_ptls())+hl.perp_ul()*(l**3)/24/flex_rig
+        eq_idx += 1
+        
+        # member length change
+        A[eq_idx, hl.point_a.var_ptr] = -hl.cos_a()
+        A[eq_idx, hl.point_a.var_ptr + 1] = -hl.sin_a()
+        A[eq_idx, hl.point_b.var_ptr] = hl.cos_a()
+        A[eq_idx, hl.point_b.var_ptr + 1] = hl.sin_a()
+        A[eq_idx, hl.var_ptr] = -l*hl.cos_a() / AE
+        A[eq_idx, hl.var_ptr + 1] = -l*hl.sin_a() / AE
+        b[eq_idx] = (l**2)/2/AE*hl.ax_ul()+sum(p*c/AE for (c, p) in hl.ax_ptls())
+        eq_idx += 1
         
     
     # --- Support equations ---
