@@ -137,16 +137,16 @@ class HydratedLine(EquationsBricklayer):
     def cos_a(self) -> float:
         return self.x_length() / self.length()
 
-    def perp_ul(self) -> float:
+    def q_perp(self) -> float:
         return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length()
     
-    def ax_ul(self) -> float:
+    def q_ax(self) -> float:
         return (self.line.ul.qx*self.x_length() + self.line.ul.qy*self.y_length()) / self.length()
 
-    def perp_ptls(self) -> List[Tuple[float, float]]:
+    def p_perp(self) -> List[Tuple[float, float]]:
         return ((ptl.c, -ptl.ptl.Px * self.sin_a() + ptl.ptl.Py * self.cos_a()) for ptl in self.line.ptls)
     
-    def ax_ptls(self) -> List[Tuple[float, float]]:
+    def p_ax(self) -> List[Tuple[float, float]]:
         return ((ptl.c, ptl.ptl.Px * self.cos_a() + ptl.ptl.Py * self.sin_a()) for ptl in self.line.ptls)
 
 def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
@@ -229,42 +229,45 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     # --- Compatibility equations (3 per line) ---
     for hl in hydrated_lines:
+        # common member props
         l = hl.length()
-        flex_rig = hl.line.bp.E * hl.line.bp.I
-        AE = hl.line.bp.E * hl.line.bp.A
+        sin_a = hl.sin_a()
+        cos_a = hl.cos_a()
+        EI = hl.line.bp.E * hl.line.bp.I # flexural rigidity
+        AE = hl.line.bp.E * hl.line.bp.A # axial rigidity
         
         # joint A rotation
         A[eq_idx, hl.point_a.var_ptr + 2] = 1
-        A[eq_idx, hl.var_ptr] = -np.sin(hl.angle_radians()) * (hl.length()**2) / 3 / flex_rig
-        A[eq_idx, hl.var_ptr + 1] = np.cos(hl.angle_radians()) * (hl.length()**2) / 3 / flex_rig
-        A[eq_idx, hl.var_ptr + 2] = hl.length() / 2 / flex_rig
-        A[eq_idx, hl.point_a.var_ptr] = -np.sin(hl.angle_radians()) / hl.length()
-        A[eq_idx, hl.point_a.var_ptr + 1] = np.cos(hl.angle_radians()) / hl.length()
-        A[eq_idx, hl.point_b.var_ptr] = np.sin(hl.angle_radians()) / hl.length()
-        A[eq_idx, hl.point_b.var_ptr + 1] = -np.cos(hl.angle_radians()) / hl.length()
-        b[eq_idx] = -sum(p*(c**2)*(3*l-c)/6/flex_rig/l for (c, p) in hl.perp_ptls())-hl.perp_ul()*(l**3)/8/flex_rig
+        A[eq_idx, hl.var_ptr] = -sin_a * (l**2) / 3 / EI
+        A[eq_idx, hl.var_ptr + 1] = cos_a * (l**2) / 3 / EI
+        A[eq_idx, hl.var_ptr + 2] = l / 2 / EI
+        A[eq_idx, hl.point_a.var_ptr] = -sin_a / l
+        A[eq_idx, hl.point_a.var_ptr + 1] = cos_a / l
+        A[eq_idx, hl.point_b.var_ptr] = sin_a / l
+        A[eq_idx, hl.point_b.var_ptr + 1] = -cos_a / l
+        b[eq_idx] = -sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp())-hl.q_perp()*(l**3)/8/EI
         eq_idx += 1
 
         # joint B rotation
         A[eq_idx, hl.point_b.var_ptr + 2] = 1
-        A[eq_idx, hl.var_ptr] = np.sin(hl.angle_radians()) * (hl.length()**2) / 6 / flex_rig
-        A[eq_idx, hl.var_ptr + 1] = -np.cos(hl.angle_radians()) * (hl.length()**2) / 6 / flex_rig
-        A[eq_idx, hl.var_ptr + 2] = -hl.length() / 2 / flex_rig
-        A[eq_idx, hl.point_a.var_ptr] = -np.sin(hl.angle_radians()) / hl.length()
-        A[eq_idx, hl.point_a.var_ptr + 1] = np.cos(hl.angle_radians()) / hl.length()
-        A[eq_idx, hl.point_b.var_ptr] = np.sin(hl.angle_radians()) / hl.length()
-        A[eq_idx, hl.point_b.var_ptr + 1] = -np.cos(hl.angle_radians()) / hl.length()
-        b[eq_idx] = sum(p*(c**3)/6/flex_rig/l for (c, p) in hl.perp_ptls())+hl.perp_ul()*(l**3)/24/flex_rig
+        A[eq_idx, hl.var_ptr] = sin_a * (l**2) / 6 / EI
+        A[eq_idx, hl.var_ptr + 1] = -cos_a * (l**2) / 6 / EI
+        A[eq_idx, hl.var_ptr + 2] = -l / 2 / EI
+        A[eq_idx, hl.point_a.var_ptr] = -sin_a / l
+        A[eq_idx, hl.point_a.var_ptr + 1] = cos_a / l
+        A[eq_idx, hl.point_b.var_ptr] = sin_a / l
+        A[eq_idx, hl.point_b.var_ptr + 1] = -cos_a / l
+        b[eq_idx] = sum(p*(c**3)/6/EI/l for (c, p) in hl.p_perp())+hl.q_perp()*(l**3)/24/EI
         eq_idx += 1
         
         # member length change
-        A[eq_idx, hl.point_a.var_ptr] = -hl.cos_a()
-        A[eq_idx, hl.point_a.var_ptr + 1] = -hl.sin_a()
-        A[eq_idx, hl.point_b.var_ptr] = hl.cos_a()
-        A[eq_idx, hl.point_b.var_ptr + 1] = hl.sin_a()
-        A[eq_idx, hl.var_ptr] = -l*hl.cos_a() / AE
-        A[eq_idx, hl.var_ptr + 1] = -l*hl.sin_a() / AE
-        b[eq_idx] = (l**2)/2/AE*hl.ax_ul()+sum(p*c/AE for (c, p) in hl.ax_ptls())
+        A[eq_idx, hl.point_a.var_ptr] = -cos_a
+        A[eq_idx, hl.point_a.var_ptr + 1] = -sin_a
+        A[eq_idx, hl.point_b.var_ptr] = cos_a
+        A[eq_idx, hl.point_b.var_ptr + 1] = sin_a
+        A[eq_idx, hl.var_ptr] = -l*cos_a / AE
+        A[eq_idx, hl.var_ptr + 1] = -l*sin_a / AE
+        b[eq_idx] = (l**2)/2/AE*hl.q_ax()+sum(p*c/AE for (c, p) in hl.p_ax())
         eq_idx += 1
         
     
