@@ -185,7 +185,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     # Calculate total equations and unknowns
     eqs_cnt = 3 * (len(hydrated_points) + len(hydrated_lines)) \
-        + sum(int(s.support.ver) + int(s.support.hor) + int(s.support.rot) for s in hydrated_supports)
+        + sum(int(s.support.hor) + int(s.support.ver) + int(s.support.rot) for s in hydrated_supports)
 
     A = np.zeros((eqs_cnt, eqs_cnt))
     b = np.zeros(eqs_cnt)
@@ -273,24 +273,22 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     # --- Support equations ---
     for hs in hydrated_supports:
-        support_idx = hs.var_ptr
-        jp = hs.point.var_ptr
+        # Horizontal support equation
+        if hs.support.hor:
+            A[eq_idx, hs.point.var_ptr] = 1 # technically any non-zero number works because b[eq_idx] is zero
+            # intentionally leave b[eq_idx] = 0. This would not be the case if there was support settlement in the x-direction
+            eq_idx += 1
         
         # Vertical support equation
         if hs.support.ver:
-            # TODO: Set up vertical reaction equation
-            # A[eq_idx, jp + 1] = coefficient for vertical joint displacement
-            # A[eq_idx, support_idx + offset] = coefficient for vertical reaction
-            eq_idx += 1
-        
-        # Horizontal support equation
-        if hs.support.hor:
-            # TODO: Set up horizontal reaction equation
+            A[eq_idx, hs.point.var_ptr + 1] = 1 # technically any non-zero number works because b[eq_idx] is zero
+            # intentionally leave b[eq_idx] = 0. This would not be the case if there was support settlement in the y-direction
             eq_idx += 1
         
         # Rotational support equation
         if hs.support.rot:
-            # TODO: Set up moment reaction equation
+            A[eq_idx, hs.point.var_ptr + 2] = 1 # technically any non-zero number works because b[eq_idx] is zero
+            # intentionally leave b[eq_idx] = 0. This would not be the case if there was rotational support settlement
             eq_idx += 1
     
     return A, b
