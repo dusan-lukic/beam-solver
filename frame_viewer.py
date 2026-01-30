@@ -3,331 +3,18 @@
 # LLM-generated
 # human reviewed
 
-from dataclasses import dataclass
-import json
 import math
 import tkinter as tk
 from tkinter import Scrollbar, messagebox
-from typing import List, Optional, Tuple
+from typing import List
 from float_to_sig import float_to_str_sig
+from fundamental_data import *
 
-# --- Data structures (for future deserialization) ---
-@dataclass
-class PointLoad:
-    Px: float
-    Py: float
-
-@dataclass
-class UniformLoad:
-    qx: float
-    qy: float
-
-@dataclass
-class Support:
-    ver: bool
-    hor: bool
-    rot: bool
-    anch: str
-
-@dataclass
-class Point:
-    id: str
-    x: float
-    y: float
-    loads: List[PointLoad]
-
-@dataclass
-class Line:
-    id: str
-    a: str
-    b: str
-    @dataclass
-    class BeamProps:
-        E: float
-        I: float
-        A: float
-    bp: BeamProps
-    ul: Optional[UniformLoad]
-    @dataclass
-    class PointLoadOnLine:
-        c: float
-        ptl: PointLoad
-    ptls: List[PointLoadOnLine]
-
-# --- Hydrated Data Structures ---
-
-@dataclass
-class EquationsBricklayer:
-    var_ptr: int
-
-@dataclass
-class HydratedSupport(EquationsBricklayer):
-    support: Support
-    point: 'HydratedPoint'
-    
-    def __init__(self, var_ptr: int, support: Support, point: 'HydratedPoint'):
-        super().__init__(var_ptr)
-        self.support = support
-        self.point = point
-
-@dataclass
-class HydratedPoint(EquationsBricklayer):
-    point: Point
-    sup: Optional['HydratedSupport']
-    lines_a: List['HydratedLine']
-    lines_b: List['HydratedLine']
-    
-    def __init__(self, var_ptr: int, point: Point, sup: Optional['HydratedSupport'] = None):
-        super().__init__(var_ptr)
-        self.point = point
-        self.sup = sup
-        self.lines_a = []
-        self.lines_b = []
-    
-    def total_load_x(self) -> float:
-        return sum(load.Px for load in self.point.loads)
-    
-    def total_load_y(self) -> float:
-        return sum(load.Py for load in self.point.loads)
-
-#TODO: document perf optimization oportunities
-#TODO: encapsulate with underscore convention + linter
-#TODO: move solver stuff to a separate module
-@dataclass
-class HydratedLine(EquationsBricklayer):
-    line: Line
-    point_a: HydratedPoint
-    point_b: HydratedPoint
-
-    def __init__(self, var_ptr: int, line: Line, point_a: HydratedPoint, point_b: HydratedPoint):
-        super().__init__(var_ptr)
-        self.line = line
-        self.point_a = point_a
-        self.point_b = point_b
-    
-    def total_load_x(self) -> float:
-        return self.line.ul.qx * self.length() if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Px for ptl in self.line.ptls) if self.line.ptls else 0.0
-    
-    def total_load_y(self) -> float:
-        return self.line.ul.qy * self.length() if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Py for ptl in self.line.ptls) if self.line.ptls else 0.
-    
-    def total_load_moment_wrt_B(self) -> float:
-        return self.line.ul.qx * self.length() * self.y_length() / 2 if self.line.ul else 0.0 \
-            - self.line.ul.qy * self.length() * self.x_length() / 2 if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Px * (1 - ptl.c/self.length()) * self.y_length() for ptl in self.line.ptls) if self.line.ptls else 0.0 \
-            - sum(ptl.ptl.Py * (1 - ptl.c/self.length()) * self.x_length() for ptl in self.line.ptls) if self.line.ptls else 0.0
-    
-    def x_length(self) -> float:
-        return self.point_b.point.x - self.point_a.point.x
-    
-    def y_length(self) -> float:
-        return self.point_b.point.y - self.point_a.point.y
-    
-    def length(self) -> float:
-        return math.sqrt(self.x_length()**2 + self.y_length()**2)
-    
-    def angle_radians(self) -> float:
-        return math.atan2(self.y_length(), self.x_length())
-    
-    def sin_a(self) -> float:
-        return self.y_length() / self.length()
-    
-    def cos_a(self) -> float:
-        return self.x_length() / self.length()
-
-    def q_perp(self) -> float:
-        return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length() if self.line.ul else 0.0
-    
-    def q_ax(self) -> float:
-        return (self.line.ul.qx*self.x_length() + self.line.ul.qy*self.y_length()) / self.length() if self.line.ul else 0.0
-
-    def p_perp(self) -> List[Tuple[float, float]]:
-        return ((ptl.c, -ptl.ptl.Px * self.sin_a() + ptl.ptl.Py * self.cos_a()) for ptl in self.line.ptls)
-    
-    def p_ax(self) -> List[Tuple[float, float]]:
-        return ((ptl.c, ptl.ptl.Px * self.cos_a() + ptl.ptl.Py * self.sin_a()) for ptl in self.line.ptls)
-
-def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
-    # variable positions
-    next_member_var = 0
-    first_joint_var = 3*len(lines)
-    next_support_var = first_joint_var + 3*len(points)
-
-    # Create HydratedPoints
-    point_dict = {p.id: HydratedPoint(first_joint_var + 3*i, p) for i, p in enumerate(points)}
-
-    # Create HydratedSupports and link to HydratedPoints
-    support_list = []
-    for s in supports:
-        hp = point_dict[s.anch]
-        hs = HydratedSupport(next_support_var, s, hp)
-        next_support_var += (int(s.ver) + int(s.hor) + int(s.rot))
-        hp.sup = hs
-        support_list.append(hs)
-    
-    # Create HydratedLines and link to HydratedPoints
-    line_list = []
-    for l in lines:
-        hp_a = point_dict[l.a]
-        hp_b = point_dict[l.b]
-        hl = HydratedLine(next_member_var, l, hp_a, hp_b)
-        next_member_var += 3
-        hp_a.lines_a.append(hl)
-        hp_b.lines_b.append(hl)
-        line_list.append(hl)
-    
-    return list(point_dict.values()), line_list, support_list
-
-def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[HydratedLine], hydrated_supports: List[HydratedSupport]) -> Tuple:
-    import numpy as np
-    
-    # Calculate total equations and unknowns
-    eqs_cnt = 3 * (len(hydrated_points) + len(hydrated_lines)) \
-        + sum(int(s.support.hor) + int(s.support.ver) + int(s.support.rot) for s in hydrated_supports)
-
-    A = np.zeros((eqs_cnt, eqs_cnt))
-    b = np.zeros(eqs_cnt)
-
-    eq_idx = 0
-    
-    # --- Equilibrium equations (3 per joint) ---
-    for hp in hydrated_points:
-        # F_x balance
-        for m in hp.lines_b:
-            A[eq_idx, m.var_ptr] = 1
-        for m in hp.lines_a:
-            A[eq_idx, m.var_ptr] = -1
-        if (hp.sup and hp.sup.support.hor):
-            A[eq_idx, hp.sup.var_ptr] = 1
-        b[eq_idx] = sum(l.total_load_x() for l in hp.lines_a) + hp.total_load_x()
-        eq_idx += 1
-
-        # F_y balance
-        for m in hp.lines_b:
-            A[eq_idx, m.var_ptr + 1] = 1
-        for m in hp.lines_a:
-            A[eq_idx, m.var_ptr + 1] = -1
-        if (hp.sup and hp.sup.support.ver):
-            A[eq_idx, hp.sup.var_ptr + (1 if hp.sup.support.hor else 0)] = 1
-        b[eq_idx] = sum(l.total_load_y() for l in hp.lines_a) + hp.total_load_y()
-        eq_idx += 1
-
-        # M balance
-        for m in hp.lines_b:
-            A[eq_idx, m.var_ptr + 2] = 1
-        for m in hp.lines_a:
-            A[eq_idx, m.var_ptr] = -m.y_length()
-            A[eq_idx, m.var_ptr + 1] = m.x_length()
-            A[eq_idx, m.var_ptr + 2] = -1
-        if (hp.sup and hp.sup.support.rot):
-            offset = (1 if hp.sup.support.hor else 0) + (1 if hp.sup.support.ver else 0)
-            A[eq_idx, hp.sup.var_ptr + offset] = 1
-        b[eq_idx] = sum(l.total_load_moment_wrt_B() for l in hp.lines_a) # nothing else because point loads on joints don't support moments
-        eq_idx += 1
-    
-    # --- Compatibility equations (3 per line) ---
-    for hl in hydrated_lines:
-        # common member props
-        l = hl.length()
-        sin_a = hl.sin_a()
-        cos_a = hl.cos_a()
-        EI = hl.line.bp.E * hl.line.bp.I # flexural rigidity
-        AE = hl.line.bp.E * hl.line.bp.A # axial rigidity
-        
-        # joint A rotation
-        A[eq_idx, hl.point_a.var_ptr + 2] = 1
-        A[eq_idx, hl.var_ptr] = -sin_a * (l**2) / 3 / EI
-        A[eq_idx, hl.var_ptr + 1] = cos_a * (l**2) / 3 / EI
-        A[eq_idx, hl.var_ptr + 2] = l / 2 / EI
-        A[eq_idx, hl.point_a.var_ptr] = -sin_a / l
-        A[eq_idx, hl.point_a.var_ptr + 1] = cos_a / l
-        A[eq_idx, hl.point_b.var_ptr] = sin_a / l
-        A[eq_idx, hl.point_b.var_ptr + 1] = -cos_a / l
-        b[eq_idx] = -sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp())-hl.q_perp()*(l**3)/8/EI
-        eq_idx += 1
-
-        # joint B rotation
-        A[eq_idx, hl.point_b.var_ptr + 2] = 1
-        A[eq_idx, hl.var_ptr] = sin_a * (l**2) / 6 / EI
-        A[eq_idx, hl.var_ptr + 1] = -cos_a * (l**2) / 6 / EI
-        A[eq_idx, hl.var_ptr + 2] = -l / 2 / EI
-        A[eq_idx, hl.point_a.var_ptr] = -sin_a / l
-        A[eq_idx, hl.point_a.var_ptr + 1] = cos_a / l
-        A[eq_idx, hl.point_b.var_ptr] = sin_a / l
-        A[eq_idx, hl.point_b.var_ptr + 1] = -cos_a / l
-        b[eq_idx] = sum(p*(c**3)/6/EI/l for (c, p) in hl.p_perp())+hl.q_perp()*(l**3)/24/EI
-        eq_idx += 1
-        
-        # member length change
-        A[eq_idx, hl.point_a.var_ptr] = -cos_a
-        A[eq_idx, hl.point_a.var_ptr + 1] = -sin_a
-        A[eq_idx, hl.point_b.var_ptr] = cos_a
-        A[eq_idx, hl.point_b.var_ptr + 1] = sin_a
-        A[eq_idx, hl.var_ptr] = -l*cos_a / AE
-        A[eq_idx, hl.var_ptr + 1] = -l*sin_a / AE
-        b[eq_idx] = (l**2)/2/AE*hl.q_ax()+sum(p*c/AE for (c, p) in hl.p_ax())
-        eq_idx += 1
-        
-    
-    # --- Support equations ---
-    for hs in hydrated_supports:
-        # Horizontal support equation
-        if hs.support.hor:
-            A[eq_idx, hs.point.var_ptr] = 1 # technically any non-zero number works because b[eq_idx] is zero
-            # intentionally leave b[eq_idx] = 0. This would not be the case if there was support settlement in the x-direction
-            eq_idx += 1
-        
-        # Vertical support equation
-        if hs.support.ver:
-            A[eq_idx, hs.point.var_ptr + 1] = 1 # technically any non-zero number works because b[eq_idx] is zero
-            # intentionally leave b[eq_idx] = 0. This would not be the case if there was support settlement in the y-direction
-            eq_idx += 1
-        
-        # Rotational support equation
-        if hs.support.rot:
-            A[eq_idx, hs.point.var_ptr + 2] = 1 # technically any non-zero number works because b[eq_idx] is zero
-            # intentionally leave b[eq_idx] = 0. This would not be the case if there was rotational support settlement
-            eq_idx += 1
-    
-    return A, b
-
-# --- Data Utils -------------------------------------
-    
-def bounding_box(points: List[Point]):
-    xs = [p.x for p in points]
-    ys = [p.y for p in points]
-    minx = min(xs)
-    maxx = max(xs)
-    miny = min(ys)
-    maxy = max(ys)
-    return minx, miny, maxx, maxy
-
-SAMPLE_DATA = """
-{
-    "points": [
-        {"id": "P1", "x": 0, "y": 0, "loads": [] },
-        {"id": "P2", "x": 6000, "y": 0, "loads": [] },
-        {"id": "P3", "x": 3000, "y": 1000, "loads": [] }
-    ],
-    "supports": [
-        { "anch": "P1", "ver": true, "hor": true, "rot": false },
-        { "anch": "P2", "ver": true, "hor": false, "rot": false }
-    ],
-    "lines": [
-        { "id": "L1", "a": "P1", "b": "P2", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] },
-        { "id": "L2", "a": "P1", "b": "P3", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] },
-        { "id": "L3", "a": "P2", "b": "P3", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] }
-    ]
-}
-"""
-    
-# ----------------------------------------------------
 
 CANVAS_MARGIN_SIZE = 30
 POINT_DIAMETER = 8
 POINT_RADIUS = POINT_DIAMETER / 2.0
+
 
 class SimpleApp(tk.Tk):
     def __init__(self):
@@ -376,9 +63,6 @@ class SimpleApp(tk.Tk):
         self.bind("<F5>", self.visualize_data)
         self.bind("<F9>", self.export_system)
 
-    # ------------------------
-    # Utils
-    # ------------------------
     def canvas_to_world(self, x: float, y: float):
         wx = (x - self.world_origin_x_in_canvas_coordinates) * self.world_over_canvas_size_ratio
         wy = (self.world_origin_y_in_canvas_coordinates - y) * self.world_over_canvas_size_ratio
@@ -388,126 +72,6 @@ class SimpleApp(tk.Tk):
         x = wx / self.world_over_canvas_size_ratio + self.world_origin_x_in_canvas_coordinates
         y = self.world_origin_y_in_canvas_coordinates - wy / self.world_over_canvas_size_ratio
         return x, y
-
-    def parse_txt_data(self):
-        #TODO: don't be so permisive for missing props, throw instead
-        txt = self.text.get("1.0", tk.END).strip()
-        if not txt:
-            messagebox.showinfo("No data", "Text box is empty.")
-            return None
-
-        try:
-            data = json.loads(txt)
-        except Exception as e:
-            messagebox.showerror("JSON error", f"Invalid JSON:\n{e}")
-            return None
-
-        if not isinstance(data, dict):
-            messagebox.showerror("Format error", "Root JSON must be an object.")
-            return None
-
-        raw_points = data.get("points")
-        raw_supports = data.get("supports")
-        raw_lines = data.get("lines")
-        if not isinstance(raw_points, list) or not isinstance(raw_supports, list) or not isinstance(raw_lines, list):
-            messagebox.showerror("Format error", "Root object must contain 'points', 'supports' and 'lines' lists.")
-            return None
-
-        # Parse points
-        points: List[Point] = []
-        try:
-            for rp in raw_points:
-                if not isinstance(rp, dict):
-                    raise ValueError("Each point must be an object.")
-                pid = str(rp["id"])
-                x = float(rp["x"])
-                y = float(rp["y"])
-                raw_loads = rp.get("loads", [])
-                if not isinstance(raw_loads, list):
-                    raise ValueError("'loads' must be a list")
-                loads: List[PointLoad] = []
-                for rl in raw_loads:
-                    if not isinstance(rl, dict):
-                        raise ValueError("Each load must be an object")
-                    px = float(rl.get("Px", rl.get("px", 0.0)))
-                    py = float(rl.get("Py", rl.get("py", 0.0)))
-                    loads.append(PointLoad(Px=px, Py=py))
-                points.append(Point(id=pid, x=x, y=y, loads=loads))
-        except KeyError as ke:
-            messagebox.showerror("Format error", f"Point missing required property: {ke}")
-            return None
-        except Exception as e:
-            messagebox.showerror("Format error", f"Invalid point data: {e}")
-            return None
-
-        # Parse supports
-        supports: List[Support] = []
-        try:
-            for rs in raw_supports:
-                if not isinstance(rs, dict):
-                    raise ValueError("Each support must be an object.")
-                ver = bool(rs.get("ver", False))
-                hor = bool(rs.get("hor", False))
-                rot = bool(rs.get("rot", False))
-                anch = str(rs.get("anch", ""))
-                supports.append(Support(ver=ver, hor=hor, rot=rot, anch=anch))
-        except Exception as e:
-            messagebox.showerror("Format error", f"Invalid support data: {e}")
-            return None
-
-        # Parse lines
-        lines: List[Line] = []
-        try:
-            for rl in raw_lines:
-                if not isinstance(rl, dict):
-                    raise ValueError("Each line must be an object.")
-                lid = str(rl["id"])
-                a = str(rl["a"])
-                b = str(rl["b"])
-
-                # Beam properties (support both uppercase and lowercase keys)
-                bp_raw = rl.get("bp", {}) or {}
-                E = float(bp_raw.get("E", bp_raw.get("e", 1.0)))
-                I = float(bp_raw.get("I", bp_raw.get("i", 1.0)))
-                A = float(bp_raw.get("A", bp_raw.get("a", 1.0)))
-                bp = Line.BeamProps(E=E, I=I, A=A)
-
-                # Uniform load on member (optional)
-                ul_obj = None
-                if "ul" in rl and rl.get("ul") is not None:
-                    ul_raw = rl.get("ul")
-                    if not isinstance(ul_raw, dict):
-                        raise ValueError("'ul' must be an object")
-                    qx = float(ul_raw.get("qx", ul_raw.get("Qx", ul_raw.get("qx", 0.0))))
-                    qy = float(ul_raw.get("qy", ul_raw.get("Qy", ul_raw.get("qy", 0.0))))
-                    ul_obj = UniformLoad(qx=qx, qy=qy)
-
-                # Point loads on the line
-                ptls_list: List[Line.PointLoadOnLine] = []
-                raw_ptls = rl.get("ptls", []) or []
-                if not isinstance(raw_ptls, list):
-                    raise ValueError("'ptls' must be a list")
-                for rpl in raw_ptls:
-                    if not isinstance(rpl, dict):
-                        raise ValueError("Each entry in 'ptls' must be an object")
-                    c = float(rpl["c"]) if "c" in rpl else float(rpl.get("C", 0.0))
-                    p_raw = rpl.get("ptl") or rpl.get("ptl", {})
-                    if not isinstance(p_raw, dict):
-                        raise ValueError("'ptl' must be an object")
-                    px = float(p_raw.get("Px", p_raw.get("px", 0.0)))
-                    py = float(p_raw.get("Py", p_raw.get("py", 0.0)))
-                    p_obj = PointLoad(Px=px, Py=py)
-                    ptls_list.append(Line.PointLoadOnLine(c=c, ptl=p_obj))
-
-                lines.append(Line(id=lid, a=a, b=b, bp=bp, ul=ul_obj, ptls=ptls_list))
-        except KeyError as ke:
-            messagebox.showerror("Format error", f"Line missing required property: {ke}")
-            return None
-        except Exception as e:
-            messagebox.showerror("Format error", f"Invalid line data: {e}")
-            return None
-        
-        return points, lines, supports
 
     def update_canvas_transform_to_fit(self, points: List[Point]):
         self.update_idletasks()
@@ -637,19 +201,34 @@ class SimpleApp(tk.Tk):
 
 
     def visualize_data(self, e):
-        points, lines, supports = self.parse_txt_data()
-        self.update_canvas_transform_to_fit(points)
-        self.draw_scene(points, lines, supports)
-
+        (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
+        if err:
+            messagebox.showerror("Data error", err)
+            return
+        self.update_canvas_transform_to_fit(scene.points)
+        self.draw_scene(scene.points, scene.lines, scene.supports)
+#TODO: separate function for common stuff, better naming, some skeleton
     def export_system(self, e):
-        points, lines, supports = self.parse_txt_data()
-        hydrated_points, hydrated_lines, hydrated_supports = build_hydrated_structures(points, lines, supports)
-        (A, b) = assemble_system(hydrated_points, hydrated_lines, hydrated_supports)
-            
-            
-
+        (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
+        if err:
+            messagebox.showerror("Data error", err)
+            return
 
 
 if __name__ == "__main__":
     app = SimpleApp()
     app.mainloop()
+
+# ------------------------
+# Utils
+# ------------------------
+    
+def bounding_box(points: List[Point]):
+    xs = [p.x for p in points]
+    ys = [p.y for p in points]
+    minx = min(xs)
+    maxx = max(xs)
+    miny = min(ys)
+    maxy = max(ys)
+    return minx, miny, maxx, maxy
+    
