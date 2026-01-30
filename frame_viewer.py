@@ -47,7 +47,7 @@ class Line:
         I: float
         A: float
     bp: BeamProps
-    ul: UniformLoad
+    ul: Optional[UniformLoad]
     @dataclass
     class PointLoadOnLine:
         c: float
@@ -138,10 +138,10 @@ class HydratedLine(EquationsBricklayer):
         return self.x_length() / self.length()
 
     def q_perp(self) -> float:
-        return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length()
+        return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length() if self.line.ul else 0.0
     
     def q_ax(self) -> float:
-        return (self.line.ul.qx*self.x_length() + self.line.ul.qy*self.y_length()) / self.length()
+        return (self.line.ul.qx*self.x_length() + self.line.ul.qy*self.y_length()) / self.length() if self.line.ul else 0.0
 
     def p_perp(self) -> List[Tuple[float, float]]:
         return ((ptl.c, -ptl.ptl.Px * self.sin_a() + ptl.ptl.Py * self.cos_a()) for ptl in self.line.ptls)
@@ -307,18 +307,18 @@ def bounding_box(points: List[Point]):
 SAMPLE_DATA = """
 {
     "points": [
-        {"id": "P1", "x": 0, "y": 0 },
-        {"id": "P2", "x": 6000, "y": 0 },
-        {"id": "P3", "x": 3000, "y": 1000 }
+        {"id": "P1", "x": 0, "y": 0, "loads": [] },
+        {"id": "P2", "x": 6000, "y": 0, "loads": [] },
+        {"id": "P3", "x": 3000, "y": 1000, "loads": [] }
     ],
     "supports": [
         { "anch": "P1", "ver": true, "hor": true, "rot": false },
         { "anch": "P2", "ver": true, "hor": false, "rot": false }
     ],
     "lines": [
-        { "id": "L1", "a": "P1", "b": "P2" },
-        { "id": "L2", "a": "P1", "b": "P3" },
-        { "id": "L3", "a": "P2", "b": "P3" }
+        { "id": "L1", "a": "P1", "b": "P2", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] },
+        { "id": "L2", "a": "P1", "b": "P3", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] },
+        { "id": "L3", "a": "P2", "b": "P3", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] }
     ]
 }
 """
@@ -390,6 +390,7 @@ class SimpleApp(tk.Tk):
         return x, y
 
     def parse_txt_data(self):
+        #TODO: don't be so permisive for missing props, throw instead
         txt = self.text.get("1.0", tk.END).strip()
         if not txt:
             messagebox.showinfo("No data", "Text box is empty.")
@@ -421,7 +422,17 @@ class SimpleApp(tk.Tk):
                 pid = str(rp["id"])
                 x = float(rp["x"])
                 y = float(rp["y"])
-                points.append(Point(id=pid, x=x, y=y))
+                raw_loads = rp.get("loads", [])
+                if not isinstance(raw_loads, list):
+                    raise ValueError("'loads' must be a list")
+                loads: List[PointLoad] = []
+                for rl in raw_loads:
+                    if not isinstance(rl, dict):
+                        raise ValueError("Each load must be an object")
+                    px = float(rl.get("Px", rl.get("px", 0.0)))
+                    py = float(rl.get("Py", rl.get("py", 0.0)))
+                    loads.append(PointLoad(Px=px, Py=py))
+                points.append(Point(id=pid, x=x, y=y, loads=loads))
         except KeyError as ke:
             messagebox.showerror("Format error", f"Point missing required property: {ke}")
             return None
@@ -453,7 +464,42 @@ class SimpleApp(tk.Tk):
                 lid = str(rl["id"])
                 a = str(rl["a"])
                 b = str(rl["b"])
-                lines.append(Line(id=lid, a=a, b=b))
+
+                # Beam properties (support both uppercase and lowercase keys)
+                bp_raw = rl.get("bp", {}) or {}
+                E = float(bp_raw.get("E", bp_raw.get("e", 1.0)))
+                I = float(bp_raw.get("I", bp_raw.get("i", 1.0)))
+                A = float(bp_raw.get("A", bp_raw.get("a", 1.0)))
+                bp = Line.BeamProps(E=E, I=I, A=A)
+
+                # Uniform load on member (optional)
+                ul_obj = None
+                if "ul" in rl and rl.get("ul") is not None:
+                    ul_raw = rl.get("ul")
+                    if not isinstance(ul_raw, dict):
+                        raise ValueError("'ul' must be an object")
+                    qx = float(ul_raw.get("qx", ul_raw.get("Qx", ul_raw.get("qx", 0.0))))
+                    qy = float(ul_raw.get("qy", ul_raw.get("Qy", ul_raw.get("qy", 0.0))))
+                    ul_obj = UniformLoad(qx=qx, qy=qy)
+
+                # Point loads on the line
+                ptls_list: List[Line.PointLoadOnLine] = []
+                raw_ptls = rl.get("ptls", []) or []
+                if not isinstance(raw_ptls, list):
+                    raise ValueError("'ptls' must be a list")
+                for rpl in raw_ptls:
+                    if not isinstance(rpl, dict):
+                        raise ValueError("Each entry in 'ptls' must be an object")
+                    c = float(rpl["c"]) if "c" in rpl else float(rpl.get("C", 0.0))
+                    p_raw = rpl.get("ptl") or rpl.get("ptl", {})
+                    if not isinstance(p_raw, dict):
+                        raise ValueError("'ptl' must be an object")
+                    px = float(p_raw.get("Px", p_raw.get("px", 0.0)))
+                    py = float(p_raw.get("Py", p_raw.get("py", 0.0)))
+                    p_obj = PointLoad(Px=px, Py=py)
+                    ptls_list.append(Line.PointLoadOnLine(c=c, ptl=p_obj))
+
+                lines.append(Line(id=lid, a=a, b=b, bp=bp, ul=ul_obj, ptls=ptls_list))
         except KeyError as ke:
             messagebox.showerror("Format error", f"Line missing required property: {ke}")
             return None
@@ -598,12 +644,7 @@ class SimpleApp(tk.Tk):
     def export_system(self, e):
         points, lines, supports = self.parse_txt_data()
         hydrated_points, hydrated_lines, hydrated_supports = build_hydrated_structures(points, lines, supports)
-
-        A = []
-        b = []
-
-        for p in points:
-            A = A + []
+        (A, b) = assemble_system(hydrated_points, hydrated_lines, hydrated_supports)
             
             
 
