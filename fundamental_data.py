@@ -2,10 +2,19 @@
 # human reviewed
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import json
 
 # --- Data structures representing frame, loads, supports, stress and strain data ---
+#
+# The data encoded here *can be incompatible*, like duplicated points, or crossing
+# lines, which are unfeasible in 2D. It is not the responsibility of this module to
+# validate such inconsistencies; that is the responsibility of higher-level modules.
+# Further incompatibility examples include stress descriptors which don't satisfy
+# equilibrium equations, or unsupported points with applied loads.
+# What is the responsibility of this module is to provide enough data for modules
+# such as frame viewer or solver to perform their tasks (drawing, forming and solving
+# systems of equations, validating data for these purposes etc).
 
 @dataclass
 class PointLoad:
@@ -50,10 +59,84 @@ class Line:
     ptls: List[PointLoadOnLine]
 
 @dataclass
+class LineStress:
+    """
+    LineStress describes internal forces and maximal stress info for a beam.
+
+    Fields:
+        S_a: Axial force at endpoint A. Positive inwards (towards the beam).
+        S_b: Axial force at endpoint B. Positive inwards.
+        P_a: Perpendicular force at endpoint A. Positive in the direction 90° CCW from positive S_a.
+        P_b: Perpendicular force at endpoint B. Same sign convention as P_a.
+        M_a: Moment at endpoint A. Positive CCW.
+        M_b: Moment at endpoint B. Positive CCW.
+        s_max: Maximal stress in the beam (magnitude or signed as appropriate for subsequent processing).
+        c_max: Position along the beam length where the maximal stress occurs (distance from A; same units as point coordinates).
+    """
+    S_a: float
+    S_b: float
+    P_a: float
+    P_b: float
+    M_a: float
+    M_b: float
+    s_max: float
+    c_max: float
+
+@dataclass
+class LineStrain:
+    """
+    LineStrain describes axial and angular strain of a beam.
+
+    Fields:
+        e: Elongation of the centerline of the beam (positive means elongation, negative means shortening).
+        theta_a: Angular rotation at endpoint A relative to the centerline (radians, positive CCW).
+        theta_b: Angular rotation at endpoint B relative to the centerline (radians, positive CCW).
+        dc: deflection curve sampled at several equidistant points along the beam length.
+    """
+    e: float
+    theta_a: float
+    theta_b: float
+    dc: List[float]
+
+@dataclass
+class PointDeflection:
+    """
+    PointDeflection contains displacement and rotation of a joint.
+
+    Fields:
+        d_x: Deflection in the global x direction.
+        d_y: Deflection in the global y direction.
+        d_t: Angular deflection (rotation) at the point, positive CCW (radians).
+    """
+    d_x: float
+    d_y: float
+    d_t: float
+
+@dataclass
+class SupportReactions:
+    """
+    SupportReactions contains reaction forces/moment at a support.
+
+    Fields:
+        R_x: Reaction force on the joint in x direction (positive in global +x).
+        R_y: Reaction force on the joint in y direction (positive in global +y).
+        R_m: Reaction moment (positive CCW) by which the support acts on the attached joint.
+    """
+    R_x: float
+    R_y: float
+    R_m: float
+
+@dataclass
 class Scene:
     points: List[Point]
     lines: List[Line]
     supports: List[Support]
+
+@dataclass
+class FrameSolution:
+    line_stresses_and_strains: Dict[str, Tuple[LineStress, LineStrain]]
+    point_deflections: Dict[str, PointDeflection]
+    support_reactions: Dict[str, SupportReactions]
 
 SAMPLE_DATA = """
 {

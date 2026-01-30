@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import List
 from fundamental_data import *
 import math
+import numpy as np
 
 # --- Hydrated Data Structures ---
 
@@ -132,8 +133,6 @@ def build_hydrated_structures(points: List[Point], lines: List[Line], supports: 
     return list(point_dict.values()), line_list, support_list
 
 def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[HydratedLine], hydrated_supports: List[HydratedSupport]) -> Tuple:
-    import numpy as np
-    
     # Calculate total equations and unknowns
     eqs_cnt = 3 * (len(hydrated_points) + len(hydrated_lines)) \
         + sum(int(s.support.hor) + int(s.support.ver) + int(s.support.rot) for s in hydrated_supports)
@@ -244,10 +243,11 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     return A, b
 
-def solve_scene(scene: Scene) -> List: # TODO: list of structures assigning fundamental frame unknowns
+def solve_scene(scene: Scene) -> FrameSolution:
     hydrated_points, hydrated_lines, hydrated_supports = build_hydrated_structures(scene.points, scene.lines, scene.supports)
     (A, b) = assemble_system(hydrated_points, hydrated_lines, hydrated_supports)
-    # TODO: solve system, produce x (stub: x = b)
-    x=b
+    
+    x = np.linalg.solve(A, b)
+    
     # TODO: parse x (stub: return empty list)
-    return []
+    return None
