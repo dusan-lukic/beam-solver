@@ -9,12 +9,30 @@ from tkinter import Scrollbar, messagebox
 from typing import List
 from float_to_sig import float_to_str_sig
 from fundamental_data import *
+from frame_solver import solve_scene
 
+
+# ------------------------
+# Utils
+# ------------------------
 
 CANVAS_MARGIN_SIZE = 30
 POINT_DIAMETER = 8
 POINT_RADIUS = POINT_DIAMETER / 2.0
 
+def bounding_box(points: List[Point]):
+    xs = [p.x for p in points]
+    ys = [p.y for p in points]
+    minx = min(xs)
+    maxx = max(xs)
+    miny = min(ys)
+    maxy = max(ys)
+    return minx, miny, maxx, maxy
+
+
+# ------------------------
+# GUI
+# ------------------------
 
 class SimpleApp(tk.Tk):
     def __init__(self):
@@ -213,22 +231,10 @@ class SimpleApp(tk.Tk):
         if err:
             messagebox.showerror("Data error", err)
             return
+        solution = solve_scene(scene)
 
 
 if __name__ == "__main__":
     app = SimpleApp()
     app.mainloop()
-
-# ------------------------
-# Utils
-# ------------------------
-    
-def bounding_box(points: List[Point]):
-    xs = [p.x for p in points]
-    ys = [p.y for p in points]
-    minx = min(xs)
-    maxx = max(xs)
-    miny = min(ys)
-    maxy = max(ys)
-    return minx, miny, maxx, maxy
     

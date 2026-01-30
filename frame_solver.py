@@ -244,7 +244,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     return A, b
 
-def soleve_scene(scene: Scene) -> List: # TODO: list of structures assigning fundamental frame unknowns
+def solve_scene(scene: Scene) -> List: # TODO: list of structures assigning fundamental frame unknowns
     hydrated_points, hydrated_lines, hydrated_supports = build_hydrated_structures(scene.points, scene.lines, scene.supports)
     (A, b) = assemble_system(hydrated_points, hydrated_lines, hydrated_supports)
     # TODO: solve system, produce x (stub: x = b)
