@@ -64,10 +64,10 @@ class LineStress:
     LineStress describes internal forces and maximal stress info for a beam.
 
     Fields:
-        S_a: Axial force at endpoint A. Positive inwards (towards the beam).
-        S_b: Axial force at endpoint B. Positive inwards.
-        P_a: Perpendicular force at endpoint A. Positive in the direction 90° CCW from positive S_a.
-        P_b: Perpendicular force at endpoint B. Same sign convention as P_a.
+        S_a: Axial force at endpoint A. Positive along the beam in the A-to-B direction.
+        S_b: Axial force at endpoint B. Positive along the beam in the B-to-A direction.
+        P_a: Perpendicular force at endpoint A. Positive upwards when the beam is horizontal and A is on the left.
+        P_b: Perpendicular force at endpoint B. Positive upwards when the beam is horizontal and A is on the left.
         M_a: Moment at endpoint A. Positive CCW.
         M_b: Moment at endpoint B. Positive CCW.
         s_max: Maximal stress in the beam (magnitude or signed as appropriate for subsequent processing).

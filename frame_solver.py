@@ -150,7 +150,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         for m in hp.lines_a:
             A[eq_idx, m.var_ptr] = -1
         if (hp.sup and hp.sup.support.hor):
-            A[eq_idx, hp.sup.var_ptr] = 1
+            A[eq_idx, hp.sup.var_ptr] = 1 #TODO: check if these should be -1 instead
         b[eq_idx] = sum(l.total_load_x() for l in hp.lines_a) + hp.total_load_x()
         eq_idx += 1
 
@@ -249,5 +249,77 @@ def solve_scene(scene: Scene) -> FrameSolution:
     
     x = np.linalg.solve(A, b)
     
-    # TODO: parse x (stub: return empty list)
-    return None
+    # Build and return a FrameSolution derived from x and hydrated structures
+    return build_frame_solution(hydrated_points, hydrated_lines, hydrated_supports, x)
+
+
+def build_frame_solution(hydrated_points: List[HydratedPoint], hydrated_lines: List[HydratedLine], hydrated_supports: List[HydratedSupport], x):
+    """
+    Produce a FrameSolution from solved system variable vector `x` and hydrated model
+    objects.
+
+    For each hydrated object this creates a corresponding entry in the output
+    dictionaries (point_deflections, line_stresses_and_strains, support_reactions).
+    """
+
+    # Points -> PointDeflection
+    point_deflections = {}
+    for hp in hydrated_points:
+        point_deflections[hp.point.id] = PointDeflection(d_x=x[hp.var_ptr], d_y=x[hp.var_ptr+1], d_t=x[hp.var_ptr+2])
+
+    # Supports -> SupportReactions
+    support_reactions = {}
+    for hs in hydrated_supports:
+        offset = 0
+        Rx = Ry = Rm = 0.0
+        if hs.support.hor:
+            Rx = x[hs.var_ptr + offset]
+            offset += 1
+        if hs.support.ver:
+            Ry = x[hs.var_ptr + offset]
+            offset += 1
+        if hs.support.rot:
+            Rm = x[hs.var_ptr + offset]
+        support_reactions[hs.support.anch] = SupportReactions(R_x=Rx, R_y=Ry, R_m=Rm)
+
+    # Lines -> LineStress and LineStrain
+    line_stresses_and_strains = {}
+    for hl in hydrated_lines:
+        # props
+        sin_a = hl.sin_a()
+        cos_a = hl.cos_a()
+        EI = hl.line.bp.E * hl.line.bp.I
+        AE = hl.line.bp.E * hl.line.bp.A
+        l = hl.length()
+
+        #stresses
+        Xb = x[hl.var_ptr]
+        Yb = x[hl.var_ptr + 1]
+        Mb = x[hl.var_ptr + 2]
+
+        Xa = -Xb - hl.total_load_x()
+        Ya = -Yb - hl.total_load_y()
+        Ma = -Mb - hl.total_load_moment_wrt_B() - Xa * hl.y_length() + Ya * hl.x_length()
+
+        S_a = Xa * cos_a + Ya * sin_a
+        S_b = Xb * cos_a + Yb * sin_a
+
+        P_a = -Xa * sin_a + Ya * cos_a
+        P_b = -Xb * sin_a + Yb * cos_a
+
+        #TODO: max stress
+        lstress = LineStress(S_a=S_a, S_b=S_b, M_a=Ma, M_b=Mb, P_a=P_a, P_b=P_b, s_max=0, c_max=0)
+
+        #strains
+        e = S_b*l/AE + (l**2)/2/AE*hl.q_ax() + sum(p*c/AE for (c, p) in hl.p_ax())
+        tht_a = - Mb*l/2/EI - P_b*(l**2)/3/EI - sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp()) - hl.q_perp()*(l**3)/8/EI
+        tht_b =   Mb*l/2/EI + P_b*(l**2)/6/EI + sum(p*(c**3)        /6/EI/l for (c, p) in hl.p_perp()) + hl.q_perp()*(l**3)/24/EI
+        
+        #TODO: deflection curve
+        lstrain = LineStrain(e=e, theta_a=tht_a, theta_b=tht_b, dc=[])
+
+        line_stresses_and_strains[hl.line.id] = (lstress, lstrain)
+
+    return FrameSolution(line_stresses_and_strains=line_stresses_and_strains,
+                         point_deflections=point_deflections,
+                         support_reactions=support_reactions)
