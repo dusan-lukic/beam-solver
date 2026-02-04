@@ -217,21 +217,28 @@ class SimpleApp(tk.Tk):
             lab_y = cy + POINT_RADIUS + 6
             self.canvas.create_text(lab_x, lab_y, text=lab, anchor="w", fill="black")
 
+    #TODO: implement (daaah)
+    def draw_solution(self, solution: FrameSolution):
+        pass
+
+    def parse_and_validate_data(self) -> Scene | None:
+        (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
+        if err:
+            messagebox.showerror("Data error", err)
+            return None
+        return scene
 
     def visualize_data(self, e):
-        (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
-        if err:
-            messagebox.showerror("Data error", err)
-            return
-        self.update_canvas_transform_to_fit(scene.points)
-        self.draw_scene(scene.points, scene.lines, scene.supports)
-#TODO: separate function for common stuff, better naming, some skeleton
+        scene: Scene | None = self.parse_and_validate_data()
+        if scene:
+            self.update_canvas_transform_to_fit(scene.points)
+            self.draw_scene(scene.points, scene.lines, scene.supports)
+
     def export_system(self, e):
-        (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
-        if err:
-            messagebox.showerror("Data error", err)
-            return
-        solution = solve_scene(scene)
+        scene: Scene | None = self.parse_and_validate_data()
+        if scene:
+            solution: FrameSolution = solve_scene(scene)
+            self.draw_solution(solution)
 
 
 if __name__ == "__main__":
