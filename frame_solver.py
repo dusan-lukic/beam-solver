@@ -150,7 +150,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         for m in hp.lines_a:
             A[eq_idx, m.var_ptr] = -1
         if (hp.sup and hp.sup.support.hor):
-            A[eq_idx, hp.sup.var_ptr] = 1 #TODO: check if these should be -1 instead
+            A[eq_idx, hp.sup.var_ptr] = -1
         b[eq_idx] = sum(l.total_load_x() for l in hp.lines_a) + hp.total_load_x()
         eq_idx += 1
 
@@ -160,7 +160,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         for m in hp.lines_a:
             A[eq_idx, m.var_ptr + 1] = -1
         if (hp.sup and hp.sup.support.ver):
-            A[eq_idx, hp.sup.var_ptr + (1 if hp.sup.support.hor else 0)] = 1
+            A[eq_idx, hp.sup.var_ptr + (1 if hp.sup.support.hor else 0)] = -1
         b[eq_idx] = sum(l.total_load_y() for l in hp.lines_a) + hp.total_load_y()
         eq_idx += 1
 
@@ -173,7 +173,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
             A[eq_idx, m.var_ptr + 2] = -1
         if (hp.sup and hp.sup.support.rot):
             offset = (1 if hp.sup.support.hor else 0) + (1 if hp.sup.support.ver else 0)
-            A[eq_idx, hp.sup.var_ptr + offset] = 1
+            A[eq_idx, hp.sup.var_ptr + offset] = -1
         b[eq_idx] = sum(l.total_load_moment_wrt_B() for l in hp.lines_a) # nothing else because point loads on joints don't support moments
         eq_idx += 1
     
@@ -292,34 +292,112 @@ def build_frame_solution(hydrated_points: List[HydratedPoint], hydrated_lines: L
         AE = hl.line.bp.E * hl.line.bp.A
         l = hl.length()
 
-        #stresses
+        # stresses
         Xb = x[hl.var_ptr]
         Yb = x[hl.var_ptr + 1]
         Mb = x[hl.var_ptr + 2]
-
-        Xa = -Xb - hl.total_load_x()
-        Ya = -Yb - hl.total_load_y()
-        Ma = -Mb - hl.total_load_moment_wrt_B() - Xa * hl.y_length() + Ya * hl.x_length()
-
-        S_a = Xa * cos_a + Ya * sin_a
-        S_b = Xb * cos_a + Yb * sin_a
-
-        P_a = -Xa * sin_a + Ya * cos_a
-        P_b = -Xb * sin_a + Yb * cos_a
-
-        #TODO: max stress
-        lstress = LineStress(S_a=S_a, S_b=S_b, M_a=Ma, M_b=Mb, P_a=P_a, P_b=P_b, s_max=0, c_max=0)
-
-        #strains
-        e = S_b*l/AE + (l**2)/2/AE*hl.q_ax() + sum(p*c/AE for (c, p) in hl.p_ax())
-        tht_a = - Mb*l/2/EI - P_b*(l**2)/3/EI - sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp()) - hl.q_perp()*(l**3)/8/EI
-        tht_b =   Mb*l/2/EI + P_b*(l**2)/6/EI + sum(p*(c**3)        /6/EI/l for (c, p) in hl.p_perp()) + hl.q_perp()*(l**3)/24/EI
         
-        #TODO: deflection curve
-        lstrain = LineStrain(e=e, theta_a=tht_a, theta_b=tht_b, dc=[])
+        Bx = Xb*cos_a + Yb*sin_a
+        Bp = -Xb*sin_a + Yb*cos_a
+        (x_max, M_bnd_max) = maxPosAndBendingMoment(hl, Mb, Bp)
+
+        lstress = LineStress(
+            S = axial_force_diagram(hl, Bx),
+            V = shear_force_diagram(hl, Bp),
+            M = bending_moment_diagram(hl, Mb, Bp),
+            s_max = M_bnd_max/hl.line.bp.I*hl.line.bp.h/2,
+            c_max = x_max)
+
+        # strains
+        lstrain = LineStrain(
+            e = Bx*l/AE + (l**2)/2/AE*hl.q_ax() + sum(p*c/AE for (c, p) in hl.p_ax()),
+            theta_a = - Mb*l/2/EI - Bp*(l**2)/3/EI - sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp()) - hl.q_perp()*(l**3)/8/EI,
+            theta_b =   Mb*l/2/EI + Bp*(l**2)/6/EI + sum(p*(c**3)        /6/EI/l for (c, p) in hl.p_perp()) + hl.q_perp()*(l**3)/24/EI,
+            dc = deflection_curve(hl, Mb, Bp))
 
         line_stresses_and_strains[hl.line.id] = (lstress, lstrain)
 
     return FrameSolution(line_stresses_and_strains=line_stresses_and_strains,
                          point_deflections=point_deflections,
                          support_reactions=support_reactions)
+
+def maxPosAndBendingMoment(hl: HydratedLine, Mb: float, Bp: float) -> Tuple[float, float]:
+    l:float = hl.length()
+    c_i:float = 0.0
+    x_max: float = 0.0
+    M_bnd_max:float = Mb + Bp*l + hl.q_perp()*l**2/2 + sum(p_perp*c for (c, p_perp) in hl.p_perp())
+    for x in [*sorted(ptl.c for ptl in hl.line.ptls), l]:
+        M_bnd = Mb + Bp*(l-x) + hl.q_perp()*(l-x)**2/2 + sum((p_perp*(c-x) if c>x else 0) for (c, p_perp) in hl.p_perp())
+        if abs(M_bnd) > abs(M_bnd_max):
+            M_bnd_max = M_bnd
+            x_max = x
+        
+        # now the fun part - check for local extrema due to distributed load
+        if hl.line.ul != None:
+            inv_q_perp = 1/hl.q_perp()
+            x_0 = l + Bp*inv_q_perp + inv_q_perp*sum((p_perp if c >= x else 0) for (c, p_perp) in hl.p_perp())
+            if c_i < x_0 < x:
+                M_bnd = Mb + Bp*(l-x_0) + hl.q_perp()*(l-x_0)**2/2 + sum((p_perp*(c-x_0) if c>x_0 else 0) for (c, p_perp) in hl.p_perp())
+                if abs(M_bnd) > abs(M_bnd_max):
+                    M_bnd_max = M_bnd
+                    x_max = x_0
+
+        c_i = x
+
+    return x_max, M_bnd_max
+
+def polyline(start_y: float, slope: float, sorted_jumps: List[Tuple[float, float]], end_x: float) -> List[Tuple[float, float]]:
+    prev: float = 0.0
+    points: List[Tuple[float, float]] = [(prev, start_y)]
+    for (x, j) in sorted_jumps:
+        V += slope * (x-prev)
+        points.append((x, V))
+        V += j
+        points.append((x, V))
+        prev = x
+    V += slope * (end_x - prev)
+    points.append((end_x, V))
+    return points
+
+def shear_force_diagram(hl: HydratedLine, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, V)
+    l: float = hl.length()
+    sorted_cpp = sorted(hl.p_perp(), key=lambda cpp: cpp[0])  # cpp is (c, p_perp)
+    return polyline(
+        start_y = hl.q_perp()*l + Bp + sum(p for (c, p) in sorted_cpp),
+        slope = -hl.q_perp(),
+        sorted_jumps = [(c, -p) for (c, p) in sorted_cpp],
+        end_x = l)
+
+def axial_force_diagram(hl: HydratedLine, Bx: float) -> List[Tuple[float, float]]: # poly-line plots of (x, S)
+    l: float = hl.length()
+    sorted_cpx = sorted(hl.p_ax(), key=lambda cpx: cpx[0])  # cpx is (c, p_ax)
+    return polyline(
+        start_y = hl.q_ax()*l + Bx + sum(p for (c, p) in sorted_cpx),
+        slope = -hl.q_ax(),
+        sorted_jumps = [(c, -p) for (c, p) in sorted_cpx],
+        end_x = l)
+
+def bending_moment_diagram(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, M)
+    l: float = hl.length()
+    x: List[float] = [0, *[c for (c, ptl) in hl.line.ptls], l]
+    if hl.line.ul != None:
+        x = x + [i* l/20 for i in range(1, 19)]  # 20 segments
+    x = sorted(list(set(x)))
+    points: List[Tuple[float, float]] = []
+    for xi in x:
+        M_bnd = Mb + Bp*(l-xi) + hl.q_perp()*(l-xi)**2/2 + sum((p_perp*(c-xi) if c > xi else 0) for (c, p_perp) in hl.p_perp())
+        points.append((xi, M_bnd))
+
+    return points
+
+def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, d)
+    l: float = hl.length()
+    EIinv = 1/(hl.line.bp.E * hl.line.bp.I)
+    x = sorted(list(set(range(0, l, l/20) + [c for (c, ptl) in hl.line.ptls])))   # 20 segments + critical points
+    points: List[Tuple[float, float]] = []
+    for xi in x:
+        d = EIinv*(Mb/2*(xi**2-l*xi) + hl.q_perp()/24*(xi**4-4*l*xi**3+6*l**2*xi**2-3*l**3*xi)  + Bp*(xi**2/6*(3*l-xi)-l**2*xi/3) +
+            sum(-p_perp*c**2*xi/6/l*(3*l-c)+p_perp/6*(xi**2*(3*c-xi) if xi <= c else c**2*(3*xi-c)) for (c, p_perp) in hl.p_perp()))
+        points.append((xi, d))
+    
+    return points

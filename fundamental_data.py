@@ -50,6 +50,7 @@ class Line:
         E: float
         I: float
         A: float
+        h: float
     bp: BeamProps
     ul: Optional[UniformLoad]
     @dataclass
@@ -64,21 +65,16 @@ class LineStress:
     LineStress describes internal forces and maximal stress info for a beam.
 
     Fields:
-        S_a: Axial force at endpoint A. Positive along the beam in the A-to-B direction.
-        S_b: Axial force at endpoint B. Positive along the beam in the B-to-A direction.
-        P_a: Perpendicular force at endpoint A. Positive upwards when the beam is horizontal and A is on the left.
+        S: Axial force diagram. Positive along the beam in the A-to-B direction.
+        V: Shear force diagram. Positive upwards when the beam is horizontal and A is on the left.
         P_b: Perpendicular force at endpoint B. Positive upwards when the beam is horizontal and A is on the left.
-        M_a: Moment at endpoint A. Positive CCW.
-        M_b: Moment at endpoint B. Positive CCW.
+        M: Bending moment iagram. Positive CCW.
         s_max: Maximal stress in the beam (magnitude or signed as appropriate for subsequent processing).
         c_max: Position along the beam length where the maximal stress occurs (distance from A; same units as point coordinates).
     """
-    S_a: float
-    S_b: float
-    P_a: float
-    P_b: float
-    M_a: float
-    M_b: float
+    S: List[float]
+    V: List[float]
+    M: List[float]
     s_max: float
     c_max: float
 
