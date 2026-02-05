@@ -325,7 +325,7 @@ def maxPosAndBendingMoment(hl: HydratedLine, Mb: float, Bp: float) -> Tuple[floa
     l:float = hl.length()
     c_i:float = 0.0
     x_max: float = 0.0
-    M_bnd_max:float = Mb + Bp*l + hl.q_perp()*l**2/2 + sum(p_perp*c for (c, p_perp) in hl.p_perp())
+    M_bnd_max:float = abs(Mb + Bp*l + hl.q_perp()*l**2/2 + sum(p_perp*c for (c, p_perp) in hl.p_perp()))
     for x in [*sorted(ptl.c for ptl in hl.line.ptls), l]:
         M_bnd = Mb + Bp*(l-x) + hl.q_perp()*(l-x)**2/2 + sum((p_perp*(c-x) if c>x else 0) for (c, p_perp) in hl.p_perp())
         if abs(M_bnd) > abs(M_bnd_max):
@@ -349,14 +349,15 @@ def maxPosAndBendingMoment(hl: HydratedLine, Mb: float, Bp: float) -> Tuple[floa
 def polyline(start_y: float, slope: float, sorted_jumps: List[Tuple[float, float]], end_x: float) -> List[Tuple[float, float]]:
     prev: float = 0.0
     points: List[Tuple[float, float]] = [(prev, start_y)]
+    y: float = start_y
     for (x, j) in sorted_jumps:
-        V += slope * (x-prev)
-        points.append((x, V))
-        V += j
-        points.append((x, V))
+        y += slope * (x-prev)
+        points.append((x, y))
+        y += j
+        points.append((x, y))
         prev = x
-    V += slope * (end_x - prev)
-    points.append((end_x, V))
+    y += slope * (end_x - prev)
+    points.append((end_x, y))
     return points
 
 def shear_force_diagram(hl: HydratedLine, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, V)
@@ -393,7 +394,7 @@ def bending_moment_diagram(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple
 def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, d)
     l: float = hl.length()
     EIinv = 1/(hl.line.bp.E * hl.line.bp.I)
-    x = sorted(list(set(range(0, l, l/20) + [c for (c, ptl) in hl.line.ptls])))   # 20 segments + critical points
+    x = sorted(list(set([(c*l/20.0) for c in range(0, 20)] + [c for (c, ptl) in hl.line.ptls])))   # 20 segments + critical points
     points: List[Tuple[float, float]] = []
     for xi in x:
         d = EIinv*(Mb/2*(xi**2-l*xi) + hl.q_perp()/24*(xi**4-4*l*xi**3+6*l**2*xi**2-3*l**3*xi)  + Bp*(xi**2/6*(3*l-xi)-l**2*xi/3) +

@@ -2,7 +2,8 @@
 # human reviewed
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, get_origin, get_args, Union
+import types
 import json
 
 # --- Data structures representing frame, loads, supports, stress and strain data ---
@@ -140,21 +141,94 @@ class FrameSolution:
 SAMPLE_DATA = """
 {
     "points": [
-        {"id": "P1", "x": 0, "y": 0, "loads": [] },
-        {"id": "P2", "x": 6000, "y": 0, "loads": [] },
-        {"id": "P3", "x": 3000, "y": 1000, "loads": [{"Px": 0, "Py": -10000}] }
+        {"id": "P1", "x": 0, "y": 0 },
+        {"id": "P2", "x": 6000, "y": 0 },
+        {"id": "P3", "x": 3000, "y": 1000, "loads": [{"Px": 0, "Py":-10000}] },
+        {"id": "P4", "x": 1500, "y": 0 },
+        {"id": "P5", "x": 1500, "y": 500 },
+        {"id": "P6", "x": 3000, "y": 0 },
+        {"id": "P7", "x": 4500, "y": 0 },
+        {"id": "P8", "x": 4500, "y": 500 }
     ],
     "supports": [
-        { "anch": "P1", "ver": true, "hor": true, "rot": false },
-        { "anch": "P2", "ver": true, "hor": false, "rot": false }
+        { "anch": "P1", "ver": true, "hor": true, "rot": true },
+        { "anch": "P2", "ver": true, "hor": true, "rot": true }
     ],
     "lines": [
-        { "id": "L1", "a": "P1", "b": "P2", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06 }, "ptls": [] },
-        { "id": "L2", "a": "P1", "b": "P3", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06 }, "ptls": [] },
-        { "id": "L3", "a": "P2", "b": "P3", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06 }, "ptls": [] }
+        { "id": "L1", "a": "P1", "b": "P5", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L2", "a": "P1", "b": "P4", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L3", "a": "P2", "b": "P7", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L4", "a": "P4", "b": "P5", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L5", "a": "P4", "b": "P6", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L6", "a": "P5", "b": "P6", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L7", "a": "P5", "b": "P3", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L8", "a": "P3", "b": "P6", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L9", "a": "P3", "b": "P8", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L10", "a": "P8", "b": "P6", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L11", "a": "P6", "b": "P7", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L12", "a": "P7", "b": "P8", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } },
+        { "id": "L13", "a": "P8", "b": "P2", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-7, "h": 0.06 } }
     ]
 }
 """
+
+def is_optional(field_type):
+    # Check if it's a Union or the | operator (UnionType in 3.10+)
+    if get_origin(field_type) is Union or get_origin(field_type) is types.UnionType:
+        return type(None) in get_args(field_type)
+    return False
+
+def strip_optional(field_type):
+    if get_origin(field_type) is Union or get_origin(field_type) is types.UnionType:
+        if type(None) in get_args(field_type):
+            args = [arg for arg in get_args(field_type) if arg is not type(None)]
+            if len(args) == 1:
+                return args[0]
+            else:
+                return Union[*args]
+    return field_type
+
+SIMPLE_TYPES = [int, float, str, bool, complex]
+
+def parse_list_of_type(raw_list: List, element_type) -> List:
+    if not isinstance(raw_list, list):
+        raise ValueError(f"Not a list")
+    i: int = 0
+    parsed_list = []
+    for el in raw_list:
+        try:
+            if get_origin(element_type) is list:
+                parsed_list.append(parse_list_of_type(el, get_args(element_type)[0]))
+            else:
+                parsed_list.append(parse_dict_of_type(el, element_type))
+        except Exception as e:
+            raise ValueError(f"{i} / {e}")
+        i += 1
+    return parsed_list
+
+def parse_dict_of_type(raw_dict: dict, cls):
+    if not isinstance(raw_dict, dict):
+        raise ValueError(f"Not an obj")
+    field_values = {}
+    for name, field in cls.__dataclass_fields__.items():
+        try:
+            if get_origin(field.type) is not list and not is_optional(field.type) and name not in raw_dict:
+                raise ValueError(f"Missing and required for {cls.__name__} type")
+            
+            if is_optional(field.type) and name not in raw_dict:
+                field_values[name] = None
+            else: # required or optional and present
+                field_type = strip_optional(field.type)
+                if get_origin(field_type) is list:
+                    field_values[name] = parse_list_of_type(raw_dict.get(name, []), get_args(field_type)[0])
+                elif field_type in SIMPLE_TYPES:
+                    field_values[name] = field_type(raw_dict[name])
+                else:
+                    field_values[name] = parse_dict_of_type(raw_dict[name], field_type)
+        except Exception as e:
+            raise ValueError(f"{name} / {e}")
+    
+    return cls(**field_values)
 
 def parse_list(raw_list: List, element_parser: callable, list_name: str) -> List:
     if not isinstance(raw_list, list):
@@ -226,15 +300,17 @@ def parse_txt_data(txt: str) -> Tuple[str, Scene]:
     try: data = json.loads(txt)
     except Exception as e: return f"Invalid JSON:\n{e}", None
 
-    if not isinstance(data, dict): return "Root JSON must be an object.", None
+    try: return "", parse_dict_of_type(data, Scene)
+    except Exception as e: return f"root / {e}", None
+    # if not isinstance(data, dict): return "Root JSON must be an object.", None
 
-    try: points: List[Point] = parse_list(data.get("points"), parse_point, "points")
-    except Exception as e: return f"Invalid points data: {e}", None
+    # try: points: List[Point] = parse_list(data.get("points"), parse_point, "points")
+    # except Exception as e: return f"Invalid points data: {e}", None
 
-    try: supports: List[Support] = parse_list(data.get("supports"), parse_support, "supports")
-    except Exception as e: return f"Invalid supports data: {e}", None
+    # try: supports: List[Support] = parse_list(data.get("supports"), parse_support, "supports")
+    # except Exception as e: return f"Invalid supports data: {e}", None
 
-    try: lines: List[Line] = parse_list(data.get("lines"), parse_line, "lines")
-    except Exception as e: return f"Invalid lines data: {e}", None
+    # try: lines: List[Line] = parse_list(data.get("lines"), parse_line, "lines")
+    # except Exception as e: return f"Invalid lines data: {e}", None
 
-    return "", Scene(points, lines, supports)
+    # return "", Scene(points, lines, supports)

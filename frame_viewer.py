@@ -77,6 +77,10 @@ class SimpleApp(tk.Tk):
         self.world_origin_y_in_canvas_coordinates = 600 - CANVAS_MARGIN_SIZE
         self.world_over_canvas_size_ratio: float = 1.0
 
+        # canvas elements references
+        self.point_ids_to_canvas_ids: Dict[str, int] = {}
+        self.line_ids_to_canvas_ids: Dict[str, int] = {}
+
         # event handlers
         self.bind("<F5>", self.visualize_data)
         self.bind("<F9>", self.export_system)
@@ -139,6 +143,8 @@ class SimpleApp(tk.Tk):
     def draw_scene(self, points: List[Point], lines: List[Line], supports: List[Support]):
         # 1) remove anything already in the canvas
         self.canvas.delete("all")
+        self.point_ids_to_canvas_ids.clear()
+        self.line_ids_to_canvas_ids.clear()
 
         # Precompute canvas centers for points using world_to_canvas
         id_to_canvas = {}
@@ -155,7 +161,7 @@ class SimpleApp(tk.Tk):
                 return
             x1, y1 = id_to_canvas[ln.a]
             x2, y2 = id_to_canvas[ln.b]
-            self.canvas.create_line(x1, y1, x2, y2, fill="black", width=1)
+            self.line_ids_to_canvas_ids[ln.id] = self.canvas.create_line(x1, y1, x2, y2, fill="black", width=6)
 
             # label near middle with small perpendicular offset
             mx = (x1 + x2) / 2.0
@@ -211,7 +217,7 @@ class SimpleApp(tk.Tk):
             y0 = cy - POINT_RADIUS
             x1 = cx + POINT_RADIUS
             y1 = cy + POINT_RADIUS
-            self.canvas.create_oval(x0, y0, x1, y1, fill="skyblue", outline="black", width=1)
+            self.point_ids_to_canvas_ids[p.id] = self.canvas.create_oval(x0, y0, x1, y1, fill="skyblue", outline="black", width=1)
             lab = f"{p.id}: {float_to_str_sig(p.x, 3)}, {float_to_str_sig(p.y, 3)}"
             lab_x = cx + POINT_RADIUS + 6 if cx < max_x - 100 else cx + POINT_RADIUS - 100
             lab_y = cy + POINT_RADIUS + 6
@@ -219,14 +225,15 @@ class SimpleApp(tk.Tk):
 
     def draw_solution(self, solution: FrameSolution):
         # Helper to compute color from s_max: 0 -> green, 1e8+ -> red
+        s_max_max = max(lstress.s_max for (lstress, _) in solution.line_stresses_and_strains.values())
         def _color_from_smax(s_max: float) -> str:
-            t = max(0.0, min(1.0, s_max / (10**8)))
+            t = max(0.0, min(1.0, s_max / s_max_max))  # normalize and clamp to [0, 1]
             r = int(255 * t)
             g = int(255 * (1.0 - t))
             return f"#{r:02x}{g:02x}00"
 
         for line_id, (lstress, _) in solution.line_stresses_and_strains.items():
-            self.canvas.itemconfigure(line_id, fill = _color_from_smax(lstress.s_max))
+            self.canvas.itemconfigure(self.line_ids_to_canvas_ids[line_id], fill = _color_from_smax(lstress.s_max))
 
     def parse_and_validate_data(self) -> Scene | None:
         (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
