@@ -134,129 +134,107 @@ class FrameSolution:
     point_deflections: Dict[str, PointDeflection]
     support_reactions: Dict[str, SupportReactions]
 
+# beam props for few common beams
+#   60x40x3 - "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06
+#
 SAMPLE_DATA = """
 {
     "points": [
         {"id": "P1", "x": 0, "y": 0, "loads": [] },
         {"id": "P2", "x": 6000, "y": 0, "loads": [] },
-        {"id": "P3", "x": 3000, "y": 1000, "loads": [] }
+        {"id": "P3", "x": 3000, "y": 1000, "loads": [{"Px": 0, "Py": -10000}] }
     ],
     "supports": [
         { "anch": "P1", "ver": true, "hor": true, "rot": false },
         { "anch": "P2", "ver": true, "hor": false, "rot": false }
     ],
     "lines": [
-        { "id": "L1", "a": "P1", "b": "P2", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] },
-        { "id": "L2", "a": "P1", "b": "P3", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] },
-        { "id": "L3", "a": "P2", "b": "P3", "bp": { "A": 1, "E": 1, "I": 1 }, "ptls": [] }
+        { "id": "L1", "a": "P1", "b": "P2", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06 }, "ptls": [] },
+        { "id": "L2", "a": "P1", "b": "P3", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06 }, "ptls": [] },
+        { "id": "L3", "a": "P2", "b": "P3", "bp": { "A": 5.41e-4, "E": 2e11, "I": 2.417e-9, "h": 0.06 }, "ptls": [] }
     ]
 }
 """
 
+def parse_list(raw_list: List, element_parser: callable, list_name: str) -> List:
+    if not isinstance(raw_list, list):
+        raise ValueError(f"'{list_name}' must be a list")
+    return [element_parser(re) for re in raw_list]
+
+def parse_point_load(raw_load: dict) -> PointLoad:
+    if not isinstance(raw_load, dict):
+        raise ValueError("Point load must be an object")
+    return PointLoad(
+        Px = float(raw_load.get("Px")),
+        Py = float(raw_load.get("Py")))
+
+def parse_point(raw_pt: dict) -> Point:
+    if not isinstance(raw_pt, dict):
+        raise ValueError("Point must be an object.")
+    return Point(
+        id = str(raw_pt["id"]),
+        x = float(raw_pt["x"]),
+        y = float(raw_pt["y"]),
+        loads = parse_list(raw_pt.get("loads", []), parse_point_load, "loads"))
+
+def parse_support(raw_support: dict) -> Support:
+    if not isinstance(raw_support, dict):
+        raise ValueError("Support must be an object.")
+    return Support(
+        ver = bool(raw_support.get("ver")),
+        hor = bool(raw_support.get("hor")),
+        rot = bool(raw_support.get("rot")),
+        anch = str(raw_support.get("anch")))
+
+def parse_uniform_load(raw_ul: dict) -> UniformLoad:
+    if not isinstance(raw_ul, dict):
+        raise ValueError("Uniform load must be an object")
+    return UniformLoad(
+        qx = float(raw_ul.get("qx")),
+        qy = float(raw_ul.get("qy")))
+
+def parse_point_load_on_line(raw_pll: dict) -> Line.PointLoadOnLine:
+    if not isinstance(raw_pll, dict):
+        raise ValueError("Point load on line must be an object")
+    return Line.PointLoadOnLine(
+        c = float(raw_pll.get("c")),
+        ptl = parse_point_load(raw_pll.get("ptl")))
+
+def parse_beam_props(raw_bp: dict) -> Line.BeamProps:
+    if not isinstance(raw_bp, dict):
+        raise ValueError("Beam properties must be an object")
+    return Line.BeamProps(
+        E = float(raw_bp.get("E")),
+        I = float(raw_bp.get("I")),
+        A = float(raw_bp.get("A")),
+        h = float(raw_bp.get("h")))
+
+def parse_line(raw_line: dict) -> Line:
+    if not isinstance(raw_line, dict):
+        raise ValueError("Each line must be an object.")
+    return Line(
+        id = str(raw_line["id"]),
+        a = str(raw_line["a"]),
+        b = str(raw_line["b"]),
+        bp = parse_beam_props(raw_line.get("bp")),
+        ul = parse_uniform_load(raw_line.get("ul")) if "ul" in raw_line and raw_line.get("ul") is not None else None,
+        ptls = parse_list(raw_line.get("ptls", []), parse_point_load_on_line, "ptls"))
+
 def parse_txt_data(txt: str) -> Tuple[str, Scene]:
-    #TODO: don't be so permisive for missing props, throw instead
     if not txt: return "Text box is empty.", None
 
-    try:
-        data = json.loads(txt)
-    except Exception as e:
-        return f"Invalid JSON:\n{e}", None
+    try: data = json.loads(txt)
+    except Exception as e: return f"Invalid JSON:\n{e}", None
 
     if not isinstance(data, dict): return "Root JSON must be an object.", None
 
-    raw_points = data.get("points")
-    raw_supports = data.get("supports")
-    raw_lines = data.get("lines")
-    if not isinstance(raw_points, list) or not isinstance(raw_supports, list) or not isinstance(raw_lines, list):
-        return "Root object must contain 'points', 'supports' and 'lines' lists.", None
+    try: points: List[Point] = parse_list(data.get("points"), parse_point, "points")
+    except Exception as e: return f"Invalid points data: {e}", None
 
-    # Parse points
-    points: List[Point] = []
-    try:
-        for rp in raw_points:
-            if not isinstance(rp, dict):
-                raise ValueError("Each point must be an object.")
-            pid = str(rp["id"])
-            x = float(rp["x"])
-            y = float(rp["y"])
-            raw_loads = rp.get("loads", [])
-            if not isinstance(raw_loads, list):
-                raise ValueError("'loads' must be a list")
-            loads: List[PointLoad] = []
-            for rl in raw_loads:
-                if not isinstance(rl, dict):
-                    raise ValueError("Each load must be an object")
-                px = float(rl.get("Px", rl.get("px", 0.0)))
-                py = float(rl.get("Py", rl.get("py", 0.0)))
-                loads.append(PointLoad(Px=px, Py=py))
-            points.append(Point(id=pid, x=x, y=y, loads=loads))
-    except KeyError as ke:
-        return f"Point missing required property: {ke}", None
-    except Exception as e:
-        return f"Invalid point data: {e}", None
+    try: supports: List[Support] = parse_list(data.get("supports"), parse_support, "supports")
+    except Exception as e: return f"Invalid supports data: {e}", None
 
-    # Parse supports
-    supports: List[Support] = []
-    try:
-        for rs in raw_supports:
-            if not isinstance(rs, dict):
-                raise ValueError("Each support must be an object.")
-            ver = bool(rs.get("ver", False))
-            hor = bool(rs.get("hor", False))
-            rot = bool(rs.get("rot", False))
-            anch = str(rs.get("anch", ""))
-            supports.append(Support(ver=ver, hor=hor, rot=rot, anch=anch))
-    except Exception as e:
-        return f"Invalid support data: {e}", None
+    try: lines: List[Line] = parse_list(data.get("lines"), parse_line, "lines")
+    except Exception as e: return f"Invalid lines data: {e}", None
 
-    # Parse lines
-    lines: List[Line] = []
-    try:
-        for rl in raw_lines:
-            if not isinstance(rl, dict):
-                raise ValueError("Each line must be an object.")
-            lid = str(rl["id"])
-            a = str(rl["a"])
-            b = str(rl["b"])
-
-            # Beam properties (support both uppercase and lowercase keys)
-            bp_raw = rl.get("bp", {}) or {}
-            E = float(bp_raw.get("E", bp_raw.get("e", 1.0)))
-            I = float(bp_raw.get("I", bp_raw.get("i", 1.0)))
-            A = float(bp_raw.get("A", bp_raw.get("a", 1.0)))
-            bp = Line.BeamProps(E=E, I=I, A=A)
-
-            # Uniform load on member (optional)
-            ul_obj = None
-            if "ul" in rl and rl.get("ul") is not None:
-                ul_raw = rl.get("ul")
-                if not isinstance(ul_raw, dict):
-                    raise ValueError("'ul' must be an object")
-                qx = float(ul_raw.get("qx", ul_raw.get("Qx", ul_raw.get("qx", 0.0))))
-                qy = float(ul_raw.get("qy", ul_raw.get("Qy", ul_raw.get("qy", 0.0))))
-                ul_obj = UniformLoad(qx=qx, qy=qy)
-
-            # Point loads on the line
-            ptls_list: List[Line.PointLoadOnLine] = []
-            raw_ptls = rl.get("ptls", []) or []
-            if not isinstance(raw_ptls, list):
-                raise ValueError("'ptls' must be a list")
-            for rpl in raw_ptls:
-                if not isinstance(rpl, dict):
-                    raise ValueError("Each entry in 'ptls' must be an object")
-                c = float(rpl["c"]) if "c" in rpl else float(rpl.get("C", 0.0))
-                p_raw = rpl.get("ptl") or rpl.get("ptl", {})
-                if not isinstance(p_raw, dict):
-                    raise ValueError("'ptl' must be an object")
-                px = float(p_raw.get("Px", p_raw.get("px", 0.0)))
-                py = float(p_raw.get("Py", p_raw.get("py", 0.0)))
-                p_obj = PointLoad(Px=px, Py=py)
-                ptls_list.append(Line.PointLoadOnLine(c=c, ptl=p_obj))
-
-            lines.append(Line(id=lid, a=a, b=b, bp=bp, ul=ul_obj, ptls=ptls_list))
-    except KeyError as ke:
-        return f"Line missing required property: {ke}", None
-    except Exception as e:
-        return f"Invalid line data: {e}", None
-    
     return "", Scene(points, lines, supports)

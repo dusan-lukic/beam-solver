@@ -217,9 +217,16 @@ class SimpleApp(tk.Tk):
             lab_y = cy + POINT_RADIUS + 6
             self.canvas.create_text(lab_x, lab_y, text=lab, anchor="w", fill="black")
 
-    #TODO: implement (daaah)
     def draw_solution(self, solution: FrameSolution):
-        pass
+        # Helper to compute color from s_max: 0 -> green, 1e8+ -> red
+        def _color_from_smax(s_max: float) -> str:
+            t = max(0.0, min(1.0, s_max / (10**8)))
+            r = int(255 * t)
+            g = int(255 * (1.0 - t))
+            return f"#{r:02x}{g:02x}00"
+
+        for line_id, (lstress, _) in solution.line_stresses_and_strains.items():
+            self.canvas.itemconfigure(line_id, fill = _color_from_smax(lstress.s_max))
 
     def parse_and_validate_data(self) -> Scene | None:
         (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
