@@ -142,13 +142,13 @@ SAMPLE_DATA = """
 {
     "points": [
         {"id": "P1", "x": 0, "y": 0 },
-        {"id": "P2", "x": 6000, "y": 0 },
-        {"id": "P3", "x": 3000, "y": 1000, "loads": [{"Px": 0, "Py":-10000}] },
-        {"id": "P4", "x": 1500, "y": 0 },
-        {"id": "P5", "x": 1500, "y": 500 },
-        {"id": "P6", "x": 3000, "y": 0 },
-        {"id": "P7", "x": 4500, "y": 0 },
-        {"id": "P8", "x": 4500, "y": 500 }
+        {"id": "P2", "x": 6, "y": 0 },
+        {"id": "P3", "x": 3, "y": 1, "loads": [{"Px": 0, "Py":-10000}] },
+        {"id": "P4", "x": 1.5, "y": 0 },
+        {"id": "P5", "x": 1.5, "y": 0.5 },
+        {"id": "P6", "x": 3, "y": 0 },
+        {"id": "P7", "x": 4.5, "y": 0 },
+        {"id": "P8", "x": 4.5, "y": 0.5 }
     ],
     "supports": [
         { "anch": "P1", "ver": true, "hor": true, "rot": true },
@@ -302,15 +302,3 @@ def parse_txt_data(txt: str) -> Tuple[str, Scene]:
 
     try: return "", parse_dict_of_type(data, Scene)
     except Exception as e: return f"root / {e}", None
-    # if not isinstance(data, dict): return "Root JSON must be an object.", None
-
-    # try: points: List[Point] = parse_list(data.get("points"), parse_point, "points")
-    # except Exception as e: return f"Invalid points data: {e}", None
-
-    # try: supports: List[Support] = parse_list(data.get("supports"), parse_support, "supports")
-    # except Exception as e: return f"Invalid supports data: {e}", None
-
-    # try: lines: List[Line] = parse_list(data.get("lines"), parse_line, "lines")
-    # except Exception as e: return f"Invalid lines data: {e}", None
-
-    # return "", Scene(points, lines, supports)
