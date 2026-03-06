@@ -29,7 +29,6 @@ def bounding_box(points: List[Point]):
     maxy = max(ys)
     return minx, miny, maxx, maxy
 
-
 # ------------------------
 # GUI
 # ------------------------
@@ -78,12 +77,16 @@ class SimpleApp(tk.Tk):
         self.world_over_canvas_size_ratio: float = 1.0
 
         # canvas elements references
+        self.scene: Scene | None = None
+        self.solution: FrameSolution | None = None
         self.point_ids_to_canvas_ids: Dict[str, int] = {}
         self.line_ids_to_canvas_ids: Dict[str, int] = {}
 
         # event handlers
         self.bind("<F5>", self.visualize_data)
-        self.bind("<F9>", self.export_system)
+        self.bind("<F9>", self.solve_and_draw)
+        # capture mouse clicks on canvas for element identification
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
 
     def canvas_to_world(self, x: float, y: float):
         wx = (x - self.world_origin_x_in_canvas_coordinates) * self.world_over_canvas_size_ratio
@@ -225,15 +228,32 @@ class SimpleApp(tk.Tk):
 
     def draw_solution(self, solution: FrameSolution):
         # Helper to compute color from s_max: 0 -> green, 1e8+ -> red
-        s_max_max = max(lstress.s_max for (lstress, _) in solution.line_stresses_and_strains.values())
+        s_max_max_abs = max(abs(lstress.s_max) for (lstress, _) in solution.line_stresses_and_strains.values())
         def _color_from_smax(s_max: float) -> str:
-            t = max(0.0, min(1.0, s_max / s_max_max))  # normalize and clamp to [0, 1]
+            t = max(0.0, min(1.0, abs(s_max) / s_max_max_abs))  # normalize and clamp to [0, 1]
             r = int(255 * t)
             g = int(255 * (1.0 - t))
             return f"#{r:02x}{g:02x}00"
 
         for line_id, (lstress, _) in solution.line_stresses_and_strains.items():
             self.canvas.itemconfigure(self.line_ids_to_canvas_ids[line_id], fill = _color_from_smax(lstress.s_max))
+
+    def on_canvas_click(self, event):
+        """Handle a click on the canvas and identify a point or line element.
+
+        If the click overlaps multiple items, preference is given to a point. If no
+        point is found but a line is, the line id is returned. Other items are
+        ignored.
+        """
+
+        if self.solution is None:
+            messagebox.showinfo("No solution", "Please visualize data and compute solution before clicking on elements.")
+            return
+        
+        # find items under click coordinate
+        x, y = event.x, event.y
+        overlapping = self.canvas.find_overlapping(x, y, x, y)
+                 
 
     def parse_and_validate_data(self) -> Scene | None:
         (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
@@ -243,16 +263,18 @@ class SimpleApp(tk.Tk):
         return scene
 
     def visualize_data(self, e):
-        scene: Scene | None = self.parse_and_validate_data()
-        if scene:
-            self.update_canvas_transform_to_fit(scene.points)
-            self.draw_scene(scene.points, scene.lines, scene.supports)
+        self.scene = self.parse_and_validate_data()
+        if self.scene:
+            self.update_canvas_transform_to_fit(self.scene.points)
+            self.draw_scene(self.scene.points, self.scene.lines, self.scene.supports)
 
-    def export_system(self, e):
-        scene: Scene | None = self.parse_and_validate_data()
-        if scene:
-            solution: FrameSolution = solve_scene(scene)
-            self.draw_solution(solution)
+    def solve_and_draw(self, e):
+        if self.scene is None:
+            messagebox.showinfo("No data", "Please visualize data before solving.")
+            return
+        
+        self.solution: FrameSolution = solve_scene(self.scene)
+        self.draw_solution(self.solution)
 
 
 if __name__ == "__main__":
