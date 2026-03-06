@@ -7,10 +7,11 @@ import math
 import tkinter as tk
 from tkinter import Scrollbar, messagebox
 from typing import List
+from custom_dialogs import PointForceDialog
 from float_to_sig import float_to_str_sig
 from fundamental_data import *
 from scene_hydrator import build_hydrated_structures, HydratedScene
-from frame_solver import solve_scene
+from frame_solver import solve_scene, forcesOnA, forcesOnB
 
 
 # ------------------------
@@ -247,6 +248,24 @@ class SimpleApp(tk.Tk):
         # find items under click coordinate
         x, y = event.x, event.y
         overlapping = self.canvas.find_overlapping(x, y, x, y)
+        point = next((p for p in self.scene.points if self.point_ids_to_canvas_ids[p.point.id] in overlapping), None)
+        if point:
+            forces: List[List[float]] = []
+            for l in point.point.loads:
+                forces.append([l.Px, l.Py, 0.0])
+            for l in point.lines_a:
+                lstress = self.solution.line_stresses[l.line.id]
+                Fx, Fy, M = forcesOnA(lstress, l.point_a.point, l.point_b.point)
+                forces.append([-Fx, -Fy, -M])
+            for l in point.lines_b:
+                lstress = self.solution.line_stresses[l.line.id]
+                Fx, Fy, M = forcesOnB(lstress, l.point_a.point, l.point_b.point)
+                forces.append([-Fx, -Fy, -M])
+            if point.sup:
+                reactions = self.solution.support_reactions[point.sup.support.anch]
+                forces.append([reactions.R_x, reactions.R_y, reactions.R_m])
+            PointForceDialog(self, point.point.id, forces)
+            return
                  
 
     def visualize_data(self, e):

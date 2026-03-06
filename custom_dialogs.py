@@ -11,7 +11,7 @@ work when the visualization details are finalized.
 
 import tkinter as tk
 from tkinter import simpledialog
-from fundamental_data import Point, Line, FrameSolution, LineStress, SupportReactions
+from typing import List
 
 
 class PointForceDialog(simpledialog.Dialog):
@@ -22,13 +22,15 @@ class PointForceDialog(simpledialog.Dialog):
         solution: the FrameSolution object containing computed reactions
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, pid: str, forces: List[List[float]]):
+        self.pid = pid
+        self.forces = forces
         super().__init__(parent, title="Forces at Point")
 
     def body(self, master):
-        label = tk.Label(master, text="Point: ")
+        label = tk.Label(master, text=f"Point: {self.pid}. X: {sum(f[0] for f in self.forces):.2f}, Y: {sum(f[1] for f in self.forces):.2f}, M: {sum(f[2] for f in self.forces):.2f}")
         label.pack()
-        # placeholder: additional widgets go here
+
         return master
 
     def apply(self):
