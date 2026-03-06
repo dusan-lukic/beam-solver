@@ -131,7 +131,8 @@ class Scene:
 
 @dataclass
 class FrameSolution:
-    line_stresses_and_strains: Dict[str, Tuple[LineStress, LineStrain]]
+    line_stresses: Dict[str, LineStress]
+    line_strains: Dict[str, LineStrain]
     point_deflections: Dict[str, PointDeflection]
     support_reactions: Dict[str, SupportReactions]
 

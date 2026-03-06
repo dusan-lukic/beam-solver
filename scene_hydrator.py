@@ -9,29 +9,25 @@ import math
 
 # --- Hydrated Data Structures ---
 
-@dataclass
-class EquationsBricklayer:
-    var_ptr: int
 
 @dataclass
-class HydratedSupport(EquationsBricklayer):
+class HydratedSupport:
     support: Support
     point: 'HydratedPoint'
     
-    def __init__(self, var_ptr: int, support: Support, point: 'HydratedPoint'):
-        super().__init__(var_ptr)
+    def __init__(self, support: Support, point: 'HydratedPoint'):
         self.support = support
         self.point = point
 
+
 @dataclass
-class HydratedPoint(EquationsBricklayer):
+class HydratedPoint:
     point: Point
     sup: Optional['HydratedSupport']
     lines_a: List['HydratedLine']
     lines_b: List['HydratedLine']
     
-    def __init__(self, var_ptr: int, point: Point, sup: Optional['HydratedSupport'] = None):
-        super().__init__(var_ptr)
+    def __init__(self, point: Point, sup: Optional['HydratedSupport'] = None):
         self.point = point
         self.sup = sup
         self.lines_a = []
@@ -43,14 +39,14 @@ class HydratedPoint(EquationsBricklayer):
     def total_load_y(self) -> float:
         return sum(load.Py for load in self.point.loads)
 
+
 @dataclass
-class HydratedLine(EquationsBricklayer):
+class HydratedLine:
     line: Line
     point_a: HydratedPoint
     point_b: HydratedPoint
 
-    def __init__(self, var_ptr: int, line: Line, point_a: HydratedPoint, point_b: HydratedPoint):
-        super().__init__(var_ptr)
+    def __init__(self, line: Line, point_a: HydratedPoint, point_b: HydratedPoint):
         self.line = line
         self.point_a = point_a
         self.point_b = point_b
@@ -113,19 +109,14 @@ class HydratedScene:
 
 
 def build_hydrated_structures(scene: Scene) -> HydratedScene:
-    # variable positions
-    next_member_var = 0
-    first_joint_var = 3*len(scene.lines)
-    next_support_var = first_joint_var + 3*len(scene.points)
     # Create HydratedPoints
-    point_dict = {p.id: HydratedPoint(first_joint_var + 3*i, p) for i, p in enumerate(scene.points)}
+    point_dict = {p.id: HydratedPoint(p) for p in scene.points}
 
     # Create HydratedSupports and link to HydratedPoints
     support_list = []
     for s in scene.supports:
         hp = point_dict[s.anch]
-        hs = HydratedSupport(next_support_var, s, hp)
-        next_support_var += (int(s.ver) + int(s.hor) + int(s.rot))
+        hs = HydratedSupport(s, hp)
         hp.sup = hs
         support_list.append(hs)
     
@@ -134,8 +125,7 @@ def build_hydrated_structures(scene: Scene) -> HydratedScene:
     for l in scene.lines:
         hp_a = point_dict[l.a]
         hp_b = point_dict[l.b]
-        hl = HydratedLine(next_member_var, l, hp_a, hp_b)
-        next_member_var += 3
+        hl = HydratedLine(l, hp_a, hp_b)
         hp_a.lines_a.append(hl)
         hp_b.lines_b.append(hl)
         line_list.append(hl)
