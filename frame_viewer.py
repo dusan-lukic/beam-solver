@@ -9,6 +9,7 @@ from tkinter import Scrollbar, messagebox
 from typing import List
 from float_to_sig import float_to_str_sig
 from fundamental_data import *
+from scene_hydrator import build_hydrated_structures, HydratedScene
 from frame_solver import solve_scene
 
 
@@ -77,7 +78,7 @@ class SimpleApp(tk.Tk):
         self.world_over_canvas_size_ratio: float = 1.0
 
         # canvas elements references
-        self.scene: Scene | None = None
+        self.scene: HydratedScene | None = None
         self.solution: FrameSolution | None = None
         self.point_ids_to_canvas_ids: Dict[str, int] = {}
         self.line_ids_to_canvas_ids: Dict[str, int] = {}
@@ -88,15 +89,18 @@ class SimpleApp(tk.Tk):
         # capture mouse clicks on canvas for element identification
         self.canvas.bind("<Button-1>", self.on_canvas_click)
 
+
     def canvas_to_world(self, x: float, y: float):
         wx = (x - self.world_origin_x_in_canvas_coordinates) * self.world_over_canvas_size_ratio
         wy = (self.world_origin_y_in_canvas_coordinates - y) * self.world_over_canvas_size_ratio
         return wx, wy
 
+
     def world_to_canvas(self, wx: float, wy: float):
         x = wx / self.world_over_canvas_size_ratio + self.world_origin_x_in_canvas_coordinates
         y = self.world_origin_y_in_canvas_coordinates - wy / self.world_over_canvas_size_ratio
         return x, y
+
 
     def update_canvas_transform_to_fit(self, points: List[Point]):
         self.update_idletasks()
@@ -143,28 +147,18 @@ class SimpleApp(tk.Tk):
         self.world_origin_x_in_canvas_coordinates = CANVAS_MARGIN_SIZE + extra_x - (minx / r)
         self.world_origin_y_in_canvas_coordinates = (maxy / r) + CANVAS_MARGIN_SIZE + extra_y
 
-    def draw_scene(self, points: List[Point], lines: List[Line], supports: List[Support]):
+
+    def draw_scene(self):
         # 1) remove anything already in the canvas
         self.canvas.delete("all")
         self.point_ids_to_canvas_ids.clear()
         self.line_ids_to_canvas_ids.clear()
 
-        # Precompute canvas centers for points using world_to_canvas
-        id_to_canvas = {}
-        max_x = 0 # needed for label manipulation at the end
-        for p in points:
-            cx, cy = self.world_to_canvas(p.x, p.y)
-            id_to_canvas[p.id] = (cx, cy)
-            max_x = max(max_x, cx)
-
         # 2) Draw lines first so they appear under points
-        for ln in lines:
-            if ln.a not in id_to_canvas or ln.b not in id_to_canvas:
-                messagebox.showinfo("Bad data", "Line connecting to an unknown point.")
-                return
-            x1, y1 = id_to_canvas[ln.a]
-            x2, y2 = id_to_canvas[ln.b]
-            self.line_ids_to_canvas_ids[ln.id] = self.canvas.create_line(x1, y1, x2, y2, fill="black", width=6)
+        for ln in self.scene.lines:
+            x1, y1 = self.world_to_canvas(ln.point_a.point.x, ln.point_a.point.y)
+            x2, y2 = self.world_to_canvas(ln.point_b.point.x, ln.point_b.point.y)
+            self.line_ids_to_canvas_ids[ln.line.id] = self.canvas.create_line(x1, y1, x2, y2, fill="black", width=6)
 
             # label near middle with small perpendicular offset
             mx = (x1 + x2) / 2.0
@@ -178,16 +172,13 @@ class SimpleApp(tk.Tk):
             else:
                 offx = -dy / length * 8
                 offy = dx / length * 8
-            self.canvas.create_text(mx + offx, my + offy, text=ln.id, fill="black")
+            self.canvas.create_text(mx + offx, my + offy, text=ln.line.id, fill="black")
 
         # 3) Draw supports (triangles) - under corresponding point circles
         s = 10.0  # side length for triangle
         h = s * math.sqrt(3) / 2.0
-        for sup in supports:
-            if sup.anch not in id_to_canvas:
-                messagebox.showinfo("Bad data", "support under an unknown point.")
-                return
-            cx, cy = id_to_canvas[sup.anch]
+        for sup in self.scene.supports:
+            cx, cy = self.world_to_canvas(sup.point.point.x, sup.point.point.y)
 
             # top of triangle just below the circle
             top_y = cy + POINT_RADIUS + 2
@@ -196,9 +187,9 @@ class SimpleApp(tk.Tk):
             bottom_y = top_y + h
 
             # color rules
-            ver = bool(sup.ver)
-            hor = bool(sup.hor)
-            rot = bool(sup.rot)
+            ver = bool(sup.support.ver)
+            hor = bool(sup.support.hor)
+            rot = bool(sup.support.rot)
             if ver and hor and rot:
                 tri_color = "red"
             elif ver and hor and not rot:
@@ -214,17 +205,19 @@ class SimpleApp(tk.Tk):
             )
 
         # 4) Draw points (circles) and their labels
-        for p in points:
-            cx, cy = id_to_canvas[p.id]
+        max_x = self.world_to_canvas(max(p.point.x for p in self.scene.points), 0)[0]
+        for p in self.scene.points:
+            cx, cy = self.world_to_canvas(p.point.x, p.point.y)
             x0 = cx - POINT_RADIUS
             y0 = cy - POINT_RADIUS
             x1 = cx + POINT_RADIUS
             y1 = cy + POINT_RADIUS
-            self.point_ids_to_canvas_ids[p.id] = self.canvas.create_oval(x0, y0, x1, y1, fill="skyblue", outline="black", width=1)
-            lab = f"{p.id}: {float_to_str_sig(p.x, 3)}, {float_to_str_sig(p.y, 3)}"
+            self.point_ids_to_canvas_ids[p.point.id] = self.canvas.create_oval(x0, y0, x1, y1, fill="skyblue", outline="black", width=1)
+            lab = f"{p.point.id}: {float_to_str_sig(p.point.x, 3)}, {float_to_str_sig(p.point.y, 3)}"
             lab_x = cx + POINT_RADIUS + 6 if cx < max_x - 100 else cx + POINT_RADIUS - 100
             lab_y = cy + POINT_RADIUS + 6
             self.canvas.create_text(lab_x, lab_y, text=lab, anchor="w", fill="black")
+
 
     def draw_solution(self, solution: FrameSolution):
         # Helper to compute color from s_max: 0 -> green, 1e8+ -> red
@@ -237,6 +230,7 @@ class SimpleApp(tk.Tk):
 
         for line_id, (lstress, _) in solution.line_stresses_and_strains.items():
             self.canvas.itemconfigure(self.line_ids_to_canvas_ids[line_id], fill = _color_from_smax(lstress.s_max))
+
 
     def on_canvas_click(self, event):
         """Handle a click on the canvas and identify a point or line element.
@@ -255,18 +249,17 @@ class SimpleApp(tk.Tk):
         overlapping = self.canvas.find_overlapping(x, y, x, y)
                  
 
-    def parse_and_validate_data(self) -> Scene | None:
+    def visualize_data(self, e):
         (err, scene) = parse_txt_data(self.text.get("1.0", tk.END).strip())
         if err:
             messagebox.showerror("Data error", err)
-            return None
-        return scene
+            return
+        
+        if scene:
+            self.scene = build_hydrated_structures(scene)
+            self.update_canvas_transform_to_fit([p.point for p in self.scene.points])
+            self.draw_scene()
 
-    def visualize_data(self, e):
-        self.scene = self.parse_and_validate_data()
-        if self.scene:
-            self.update_canvas_transform_to_fit(self.scene.points)
-            self.draw_scene(self.scene.points, self.scene.lines, self.scene.supports)
 
     def solve_and_draw(self, e):
         if self.scene is None:

@@ -1,141 +1,28 @@
 # LLM-generated
 # human reviewed
 
-from dataclasses import dataclass
 from typing import List
 from fundamental_data import *
-import math
 import numpy as np
-
-# --- Hydrated Data Structures ---
-
-@dataclass
-class EquationsBricklayer:
-    var_ptr: int
-
-@dataclass
-class HydratedSupport(EquationsBricklayer):
-    support: Support
-    point: 'HydratedPoint'
-    
-    def __init__(self, var_ptr: int, support: Support, point: 'HydratedPoint'):
-        super().__init__(var_ptr)
-        self.support = support
-        self.point = point
-
-@dataclass
-class HydratedPoint(EquationsBricklayer):
-    point: Point
-    sup: Optional['HydratedSupport']
-    lines_a: List['HydratedLine']
-    lines_b: List['HydratedLine']
-    
-    def __init__(self, var_ptr: int, point: Point, sup: Optional['HydratedSupport'] = None):
-        super().__init__(var_ptr)
-        self.point = point
-        self.sup = sup
-        self.lines_a = []
-        self.lines_b = []
-    
-    def total_load_x(self) -> float:
-        return sum(load.Px for load in self.point.loads)
-    
-    def total_load_y(self) -> float:
-        return sum(load.Py for load in self.point.loads)
+from scene_hydrator import *
 
 #TODO: document perf optimization oportunities
 #TODO: encapsulate with underscore convention + linter
-@dataclass
-class HydratedLine(EquationsBricklayer):
-    line: Line
-    point_a: HydratedPoint
-    point_b: HydratedPoint
 
-    def __init__(self, var_ptr: int, line: Line, point_a: HydratedPoint, point_b: HydratedPoint):
-        super().__init__(var_ptr)
-        self.line = line
-        self.point_a = point_a
-        self.point_b = point_b
-    
-    def total_load_x(self) -> float:
-        return self.line.ul.qx * self.length() if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Px for ptl in self.line.ptls) if self.line.ptls else 0.0
-    
-    def total_load_y(self) -> float:
-        return self.line.ul.qy * self.length() if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Py for ptl in self.line.ptls) if self.line.ptls else 0.
-    
-    def total_load_moment_wrt_B(self) -> float:
-        return self.line.ul.qx * self.length() * self.y_length() / 2 if self.line.ul else 0.0 \
-            - self.line.ul.qy * self.length() * self.x_length() / 2 if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Px * (1 - ptl.c/self.length()) * self.y_length() for ptl in self.line.ptls) if self.line.ptls else 0.0 \
-            - sum(ptl.ptl.Py * (1 - ptl.c/self.length()) * self.x_length() for ptl in self.line.ptls) if self.line.ptls else 0.0
-    
-    def x_length(self) -> float:
-        return self.point_b.point.x - self.point_a.point.x
-    
-    def y_length(self) -> float:
-        return self.point_b.point.y - self.point_a.point.y
-    
-    def length(self) -> float:
-        return math.sqrt(self.x_length()**2 + self.y_length()**2)
-    
-    def angle_radians(self) -> float:
-        return math.atan2(self.y_length(), self.x_length())
-    
-    def sin_a(self) -> float:
-        return self.y_length() / self.length()
-    
-    def cos_a(self) -> float:
-        return self.x_length() / self.length()
 
-    def q_perp(self) -> float:
-        return (-self.line.ul.qx*self.y_length() + self.line.ul.qy*self.x_length()) / self.length() if self.line.ul else 0.0
+def solve_scene(scene: HydratedScene) -> FrameSolution:
+    (A, b) = assemble_system(scene)
     
-    def q_ax(self) -> float:
-        return (self.line.ul.qx*self.x_length() + self.line.ul.qy*self.y_length()) / self.length() if self.line.ul else 0.0
-
-    def p_perp(self) -> List[Tuple[float, float]]:
-        return ((ptl.c, -ptl.ptl.Px * self.sin_a() + ptl.ptl.Py * self.cos_a()) for ptl in self.line.ptls)
+    x = np.linalg.solve(A, b)
     
-    def p_ax(self) -> List[Tuple[float, float]]:
-        return ((ptl.c, ptl.ptl.Px * self.cos_a() + ptl.ptl.Py * self.sin_a()) for ptl in self.line.ptls)
+    # Build and return a FrameSolution derived from x and hydrated structures
+    return build_frame_solution(scene, x)
 
-def build_hydrated_structures(points: List[Point], lines: List[Line], supports: List[Support]) -> Tuple[List[HydratedPoint], List[HydratedLine], List[HydratedSupport]]:
-    # variable positions
-    next_member_var = 0
-    first_joint_var = 3*len(lines)
-    next_support_var = first_joint_var + 3*len(points)
 
-    # Create HydratedPoints
-    point_dict = {p.id: HydratedPoint(first_joint_var + 3*i, p) for i, p in enumerate(points)}
-
-    # Create HydratedSupports and link to HydratedPoints
-    support_list = []
-    for s in supports:
-        hp = point_dict[s.anch]
-        hs = HydratedSupport(next_support_var, s, hp)
-        next_support_var += (int(s.ver) + int(s.hor) + int(s.rot))
-        hp.sup = hs
-        support_list.append(hs)
-    
-    # Create HydratedLines and link to HydratedPoints
-    line_list = []
-    for l in lines:
-        hp_a = point_dict[l.a]
-        hp_b = point_dict[l.b]
-        hl = HydratedLine(next_member_var, l, hp_a, hp_b)
-        next_member_var += 3
-        hp_a.lines_a.append(hl)
-        hp_b.lines_b.append(hl)
-        line_list.append(hl)
-    
-    return list(point_dict.values()), line_list, support_list
-
-def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[HydratedLine], hydrated_supports: List[HydratedSupport]) -> Tuple:
+def assemble_system(scene: HydratedScene) -> Tuple[np.ndarray, np.ndarray]:
     # Calculate total equations and unknowns
-    eqs_cnt = 3 * (len(hydrated_points) + len(hydrated_lines)) \
-        + sum(int(s.support.hor) + int(s.support.ver) + int(s.support.rot) for s in hydrated_supports)
+    eqs_cnt = 3 * (len(scene.points) + len(scene.lines)) \
+        + sum(int(s.support.hor) + int(s.support.ver) + int(s.support.rot) for s in scene.supports)
 
     A = np.zeros((eqs_cnt, eqs_cnt))
     b = np.zeros(eqs_cnt)
@@ -143,7 +30,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     eq_idx = 0
     
     # --- Equilibrium equations (3 per joint) ---
-    for hp in hydrated_points:
+    for hp in scene.points:
         # F_x balance
         for m in hp.lines_b:
             A[eq_idx, m.var_ptr] = 1
@@ -178,7 +65,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         eq_idx += 1
     
     # --- Compatibility equations (3 per line) ---
-    for hl in hydrated_lines:
+    for hl in scene.lines:
         # common member props
         l = hl.length()
         sin_a = hl.sin_a()
@@ -222,7 +109,7 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
         
     
     # --- Support equations ---
-    for hs in hydrated_supports:
+    for hs in scene.supports:
         # Horizontal support equation
         if hs.support.hor:
             A[eq_idx, hs.point.var_ptr] = 1 # technically any non-zero number works because b[eq_idx] is zero
@@ -243,17 +130,8 @@ def assemble_system(hydrated_points: List[HydratedPoint], hydrated_lines: List[H
     
     return A, b
 
-def solve_scene(scene: Scene) -> FrameSolution:
-    hydrated_points, hydrated_lines, hydrated_supports = build_hydrated_structures(scene.points, scene.lines, scene.supports)
-    (A, b) = assemble_system(hydrated_points, hydrated_lines, hydrated_supports)
-    
-    x = np.linalg.solve(A, b)
-    
-    # Build and return a FrameSolution derived from x and hydrated structures
-    return build_frame_solution(hydrated_points, hydrated_lines, hydrated_supports, x)
 
-
-def build_frame_solution(hydrated_points: List[HydratedPoint], hydrated_lines: List[HydratedLine], hydrated_supports: List[HydratedSupport], x):
+def build_frame_solution(scene: HydratedScene, x):
     """
     Produce a FrameSolution from solved system variable vector `x` and hydrated model
     objects.
@@ -264,12 +142,12 @@ def build_frame_solution(hydrated_points: List[HydratedPoint], hydrated_lines: L
 
     # Points -> PointDeflection
     point_deflections = {}
-    for hp in hydrated_points:
+    for hp in scene.points:
         point_deflections[hp.point.id] = PointDeflection(d_x=x[hp.var_ptr], d_y=x[hp.var_ptr+1], d_t=x[hp.var_ptr+2])
 
     # Supports -> SupportReactions
     support_reactions = {}
-    for hs in hydrated_supports:
+    for hs in scene.supports:
         offset = 0
         Rx = Ry = Rm = 0.0
         if hs.support.hor:
@@ -284,7 +162,7 @@ def build_frame_solution(hydrated_points: List[HydratedPoint], hydrated_lines: L
 
     # Lines -> LineStress and LineStrain
     line_stresses_and_strains = {}
-    for hl in hydrated_lines:
+    for hl in scene.lines:
         # props
         sin_a = hl.sin_a()
         cos_a = hl.cos_a()
