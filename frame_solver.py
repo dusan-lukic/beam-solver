@@ -16,7 +16,9 @@ def solve_scene(scene: HydratedScene) -> FrameSolution:
     x = np.linalg.solve(A, b)
     
     # Build and return a FrameSolution derived from x and hydrated structures
-    return build_frame_solution(scene, x)
+    solution: FrameSolution = build_frame_solution(scene, x)
+    validate_equilibrium(scene, solution)
+    return solution
 
 
 def assemble_system(scene: HydratedScene) -> Tuple[np.ndarray, np.ndarray]:
@@ -280,3 +282,84 @@ def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float
         points.append((xi, d))
     
     return points
+
+#TODO: check if fundamental types are respected, like force diagrams should be 2D not 1D, ETC.
+
+def forcesOnA(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    S_a = lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
+    V_a = lstress.V[0][1]   # and similar for other diagrams
+    M_a = lstress.M[0][1]
+
+    dx = point_b.x - point_a.x
+    dy = point_b.y - point_a.y
+    l = math.hypot(dx, dy)
+    cos_a = dx / l
+    sin_a = dy / l
+
+    # Forces at A (internal force acting on joint A)
+    Fx_A = S_a * cos_a - V_a * sin_a
+    Fy_A = S_a * sin_a + V_a * cos_a
+
+    return Fx_A, Fy_A, M_a
+
+def forcesOnB(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    S_b = lstress.S[-1][1]  # S at B is the second value in the last tuple of the S diagram
+    V_b = lstress.V[-1][1]
+    M_b = lstress.M[-1][1]
+
+    dx = point_b.x - point_a.x
+    dy = point_b.y - point_a.y
+    l = math.hypot(dx, dy)
+    cos_a = dx / l
+    sin_a = dy / l
+
+    # Forces at B: (internal force acting on joint B)
+    Fx_B = S_b * cos_a - V_b * sin_a
+    Fy_B = S_b * sin_a + V_b * cos_a
+
+    return -Fx_B, -Fy_B, -M_b
+
+def validate_equilibrium(points: List[HydratedPoint], lines: List[HydratedLine], supports: List[HydratedSupport], solution: FrameSolution):
+    for hl in lines:
+        lstress, _ = solution.line_stresses_and_strains[hl.line.id]
+        total_ax = lstress.S[0][1] - lstress.S[-1][1] + sum(p_ax[1] for p_ax in hl.p_ax()) + hl.q_ax()*hl.length()
+        if abs(total_ax) > 1:
+            print(f"Equilibrium validation failed for line {hl.line.id}: S at A + S at B + sum(p_ax) + q_ax*length should be 0 but is {total_ax}")
+        
+        total_perp = lstress.V[0][1] - lstress.V[-1][1] + sum(p_perp[1] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()
+        if abs(total_perp) > 1:
+            print(f"Equilibrium validation failed for line {hl.line.id}: V at A + V at B + sum(p_perp) + q_perp*length should be 0 but is {total_perp}")
+        
+        total_m_wrt_A = lstress.M[0][1] - lstress.M[-1][1] + sum(p_perp[1]*p_perp[0] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()*hl.length()/2
+        if abs(total_m_wrt_A) > 1:
+            print(f"Equilibrium validation failed for line {hl.line.id}: M at A + M at B + sum(p_perp*c) + q_perp*length^2/2 should be 0 but is {total_m_wrt_A}")
+    
+    for p in points:
+        total_Fx = 0.0
+        total_Fy = 0.0
+        total_M = 0.0
+        for l in p.lines_a:
+            lstress, _ = solution.line_stresses_and_strains[l.line.id]
+            Fx, Fy, M = forcesOnA(lstress, l.point_a.point, l.point_b.point)
+            total_Fx -= Fx
+            total_Fy -= Fy
+            total_M -= M
+        for l in p.lines_b:
+            lstress, _ = solution.line_stresses_and_strains[l.line.id]
+            Fx, Fy, M = forcesOnB(lstress, l.point_a.point, l.point_b.point)
+            total_Fx -= Fx
+            total_Fy -= Fy
+            total_M -= M
+        for load in p.point.loads:
+            total_Fx += load.Px
+            total_Fy += load.Py
+        if p.sup is not None:
+            sr = solution.support_reactions[p.sup.support.anch]
+            total_Fx += sr.R_x
+            total_Fy += sr.R_y
+            total_M += sr.R_m
+        
+        if (abs(total_Fx) > 1 or abs(total_Fy) > 1 or abs(total_M) > 1):
+            print(f"Equilibrium validation failed at point {p.point.id}: total_Fx={total_Fx}, total_Fy={total_Fy}, total_M={total_M}")
+
+    pass
