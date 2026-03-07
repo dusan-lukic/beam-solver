@@ -250,20 +250,21 @@ class SimpleApp(tk.Tk):
         overlapping = self.canvas.find_overlapping(x, y, x, y)
         point = next((p for p in self.scene.points if self.point_ids_to_canvas_ids[p.point.id] in overlapping), None)
         if point:
-            forces: List[List[float]] = []
+            forces: Dict[str, List[float]] = {}
             for l in point.point.loads:
-                forces.append([l.Px, l.Py, 0.0])
+                forces[f"load{len(forces) + 1}"] = [l.Px, l.Py, 0.0]
             for l in point.lines_a:
                 lstress = self.solution.line_stresses[l.line.id]
                 Fx, Fy, M = forcesOnA(lstress, l.point_a.point, l.point_b.point)
-                forces.append([-Fx, -Fy, -M])
+                forces[l.line.id] = [-Fx, -Fy, -M]
             for l in point.lines_b:
                 lstress = self.solution.line_stresses[l.line.id]
                 Fx, Fy, M = forcesOnB(lstress, l.point_a.point, l.point_b.point)
-                forces.append([-Fx, -Fy, -M])
+                forces[l.line.id] = [-Fx, -Fy, -M]
             if point.sup:
                 reactions = self.solution.support_reactions[point.sup.support.anch]
-                forces.append([reactions.R_x, reactions.R_y, reactions.R_m])
+                forces["Sup"] = [reactions.R_x, reactions.R_y, reactions.R_m]
+
             PointForceDialog(self, point.point.id, forces)
             return
                  
