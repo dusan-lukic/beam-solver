@@ -12,7 +12,9 @@ work when the visualization details are finalized.
 import math
 import tkinter as tk
 from tkinter import simpledialog
-from typing import List, Dict
+from typing import List, Tuple
+from frame_solver import LineStress, LineStrain
+from scene_hydrator import HydratedLine
 
 
 class PointForceDialog(simpledialog.Dialog):
@@ -90,15 +92,65 @@ class LineForceDialog(simpledialog.Dialog):
     Attributes:
         line: the Line instance associated with the dialog
         lstress: the LineStress instance for that line
+        lstrain: the LineStrain instance for that line
     """
 
-    def __init__(self, parent):
-        super().__init__(parent, title="Forces on Line")
+    def __init__(self, parent, line: HydratedLine, lstress: LineStress, lstrain: LineStrain):
+        self.line = line
+        self.lstress = lstress
+        self.lstrain = lstrain
+        super().__init__(parent, title=f"Forces on {line.line.id}")
 
     def body(self, master):
-        label = tk.Label(master, text="Line: ")
-        label.pack()
-        # placeholder area
+        # Calculate line length
+        length = math.hypot(
+            self.line.point_b.point.x - self.line.point_a.point.x,
+            self.line.point_b.point.y - self.line.point_a.point.y)
+        
+        # Function to plot a diagram on a canvas
+        def plot_diagram(canvas, values: List[Tuple[float, float]], title: str):
+            min_x = min(x for x, _ in values)
+            max_x = max(x for x, _ in values)
+            x_scale = 800 / (max_x - min_x) if max_x > min_x else 1
+
+            min_v = min(v for _, v in values)
+            max_v = max(v for _, v in values)
+            y_scale = 180 / (max_v - min_v) if max_v > min_v else 1
+            y_offset = 100
+            
+            # Draw axis
+            canvas.create_line(0, y_offset, 800, y_offset, fill="black")
+            
+            # Plot points
+            points = []
+            for x, v in values:
+                px = (x - min_x) * x_scale
+                py = y_offset - (v - (min_v + max_v)/2) * y_scale
+                points.extend([px, py])
+            
+            canvas.create_line(*points, fill="blue", width=2)
+            
+            # Title
+            canvas.create_text(400, 10, text=title, anchor="n")
+        
+        # Bending Moment
+        tk.Label(master, text="Bending Moment Diagram").pack()
+        canvas_m = tk.Canvas(master, width=800, height=200, bg="white")
+        canvas_m.pack()
+        plot_diagram(canvas_m, self.lstress.M, "Bending Moment")
+        
+        # Axial Force
+        tk.Label(master, text="Axial Force Diagram").pack()
+        canvas_s = tk.Canvas(master, width=800, height=200, bg="white")
+        canvas_s.pack()
+        plot_diagram(canvas_s, self.lstress.S, "Axial Force")
+        
+        # Perpendicular Force (Shear)
+        tk.Label(master, text="Shear Force Diagram").pack()
+        canvas_v = tk.Canvas(master, width=800, height=200, bg="white")
+        canvas_v.pack()
+        plot_diagram(canvas_v, self.lstress.V, "Shear Force")
+        
         return master
 
     def apply(self):

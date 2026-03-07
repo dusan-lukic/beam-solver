@@ -7,7 +7,7 @@ import math
 import tkinter as tk
 from tkinter import Scrollbar, messagebox
 from typing import List
-from custom_dialogs import PointForceDialog
+from custom_dialogs import PointForceDialog, LineForceDialog
 from float_to_sig import float_to_str_sig
 from fundamental_data import *
 from scene_hydrator import build_hydrated_structures, HydratedScene
@@ -266,6 +266,13 @@ class SimpleApp(tk.Tk):
                 forces["Sup"] = [reactions.R_x, reactions.R_y, reactions.R_m]
 
             PointForceDialog(self, point.point.id, forces)
+            return
+        
+        line = next((l for l in self.scene.lines if self.line_ids_to_canvas_ids[l.line.id] in overlapping), None)
+        if line:
+            lstress = self.solution.line_stresses[line.line.id]
+            lstrain = self.solution.line_strains[line.line.id]
+            LineForceDialog(self, line, lstress, lstrain)
             return
                  
 

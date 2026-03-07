@@ -321,8 +321,6 @@ def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float
     
     return points
 
-#TODO: check if fundamental types are respected, like force diagrams should be 2D not 1D, ETC.
-
 def forcesOnA(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
     S_a = lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
     V_a = lstress.V[0][1]   # and similar for other diagrams

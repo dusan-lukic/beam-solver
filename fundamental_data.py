@@ -73,9 +73,9 @@ class LineStress:
         s_max: Maximal stress in the beam (magnitude or signed as appropriate for subsequent processing).
         c_max: Position along the beam length where the maximal stress occurs (distance from A; same units as point coordinates).
     """
-    S: List[float]
-    V: List[float]
-    M: List[float]
+    S: List[Tuple[float, float]]
+    V: List[Tuple[float, float]]
+    M: List[Tuple[float, float]]
     s_max: float
     c_max: float
 
@@ -93,7 +93,7 @@ class LineStrain:
     e: float
     theta_a: float
     theta_b: float
-    dc: List[float]
+    dc: List[Tuple[float, float]]
 
 @dataclass
 class PointDeflection:
