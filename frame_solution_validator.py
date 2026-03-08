@@ -11,18 +11,18 @@ from frame_solver import forcesOnA, forcesOnB
 def validate_equilibrium(scene: HydratedScene, solution: FrameSolution):
     for hl in scene.lines:
         lstress = solution.line_stresses[hl.line.id]
-        total_ax = lstress.S[-1][1] - lstress.S[0][1] + sum(p_ax[1] for p_ax in hl.p_ax()) + hl.q_ax()*hl.length()
+        total_ax = lstress.S[-1].y - lstress.S[0].y + sum(p_ax[1] for p_ax in hl.p_ax()) + hl.q_ax()*hl.length()
         if abs(total_ax) > 1:
             print(f"Equilibrium validation failed for line {hl.line.id}: S at A + S at B + sum(p_ax) + q_ax*length should be 0 but is {total_ax}")
         
-        total_perp = lstress.V[-1][1] - lstress.V[0][1] + sum(p_perp[1] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()
+        total_perp = lstress.V[-1].y - lstress.V[0].y + sum(p_perp[1] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()
         if abs(total_perp) > 1:
             print(f"Equilibrium validation failed for line {hl.line.id}: V at A + V at B + sum(p_perp) + q_perp*length should be 0 but is {total_perp}")
         
-        total_m_wrt_A = lstress.M[-1][1] - lstress.M[0][1] \
+        total_m_wrt_A = lstress.M[-1].y - lstress.M[0].y \
             + sum(p_perp[1]*p_perp[0] for p_perp in hl.p_perp()) \
             + hl.q_perp()*hl.length()*hl.length()/2 \
-            + lstress.V[-1][1]*hl.length()
+            + lstress.V[-1].y*hl.length()
         if abs(total_m_wrt_A) > 1:
             print(f"Equilibrium validation failed for line {hl.line.id}: M at A + M at B + sum(p_perp*c) + q_perp*length^2/2 should be 0 but is {total_m_wrt_A}")
     

@@ -2,7 +2,7 @@
 # human reviewed
 
 from typing import List, Dict, Tuple, Optional
-from fundamental_data import FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, FrameSolution, SupportReactions, Scene
+from fundamental_data import D2Point, FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, FrameSolution, SupportReactions, Scene
 import numpy as np
 import math
 from scene_hydrator import HydratedScene, HydratedLine
@@ -255,21 +255,21 @@ def maxPosAndBendingMoment(hl: HydratedLine, Mb: float, Bp: float) -> Tuple[floa
 
     return x_max, M_bnd_max
 
-def polyline(start_y: float, slope: float, sorted_jumps: List[Tuple[float, float]], end_x: float) -> List[Tuple[float, float]]:
+def polyline(start_y: float, slope: float, sorted_jumps: List[Tuple[float, float]], end_x: float) -> List[D2Point]:
     prev: float = 0.0
-    points: List[Tuple[float, float]] = [(prev, start_y)]
+    points: List[D2Point] = [D2Point(x=prev, y=start_y)]
     y: float = start_y
     for (x, j) in sorted_jumps:
         y += slope * (x-prev)
-        points.append((x, y))
+        points.append(D2Point(x=x, y=y))
         y += j
-        points.append((x, y))
+        points.append(D2Point(x=x, y=y))
         prev = x
     y += slope * (end_x - prev)
-    points.append((end_x, y))
+    points.append(D2Point(x=end_x, y=y))
     return points
 
-def shear_force_diagram(hl: HydratedLine, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, V)
+def shear_force_diagram(hl: HydratedLine, Bp: float) -> List[D2Point]: # poly-line plots of (x, V)
     l: float = hl.length()
     sorted_cpp = sorted(hl.p_perp(), key=lambda cpp: cpp[0])  # cpp is (c, p_perp)
     return polyline(
@@ -278,7 +278,7 @@ def shear_force_diagram(hl: HydratedLine, Bp: float) -> List[Tuple[float, float]
         sorted_jumps = [(c, -p) for (c, p) in sorted_cpp],
         end_x = l)
 
-def axial_force_diagram(hl: HydratedLine, Bx: float) -> List[Tuple[float, float]]: # poly-line plots of (x, S)
+def axial_force_diagram(hl: HydratedLine, Bx: float) -> List[D2Point]: # poly-line plots of (x, S)
     l: float = hl.length()
     sorted_cpx = sorted(hl.p_ax(), key=lambda cpx: cpx[0])  # cpx is (c, p_ax)
     return polyline(
@@ -287,37 +287,37 @@ def axial_force_diagram(hl: HydratedLine, Bx: float) -> List[Tuple[float, float]
         sorted_jumps = [(c, -p) for (c, p) in sorted_cpx],
         end_x = l)
 
-def bending_moment_diagram(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, M)
+def bending_moment_diagram(hl: HydratedLine, Mb: float, Bp: float) -> List[D2Point]: # poly-line plots of (x, M)
     l: float = hl.length()
     x: List[float] = [0, *[c for (c, ptl) in hl.line.ptls], l]
     if hl.line.ul != None:
         x = x + [i* l/20 for i in range(1, 19)]  # 20 segments
     x = sorted(list(set(x)))
-    points: List[Tuple[float, float]] = []
+    points: List[D2Point] = []
     for xi in x:
         M_bnd = Mb + Bp*(l-xi) + hl.q_perp()*(l-xi)**2/2 + sum((p_perp*(c-xi) if c > xi else 0) for (c, p_perp) in hl.p_perp())
-        points.append((xi, M_bnd))
+        points.append(D2Point(x=xi, y=M_bnd))
 
     return points
 
-def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float, float]]: # poly-line plots of (x, d)
+def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[D2Point]: # poly-line plots of (x, d)
     l: float = hl.length()
     EIinv = 1/(hl.line.bp.E * hl.line.bp.I)
     x = sorted(list(set([(c*l/20.0) for c in range(0, 20)] + [c for (c, ptl) in hl.line.ptls])))   # 20 segments + critical points
-    points: List[Tuple[float, float]] = []
+    points: List[D2Point] = []
     for xi in x:
         d = EIinv*(Mb/2*(xi**2-l*xi) + hl.q_perp()/24*(xi**4-4*l*xi**3+6*l**2*xi**2-3*l**3*xi)  + Bp*(xi**2/6*(3*l-xi)-l**2*xi/3) +
             sum(-p_perp*c**2*xi/6/l*(3*l-c)+p_perp/6*(xi**2*(3*c-xi) if xi <= c else c**2*(3*xi-c)) for (c, p_perp) in hl.p_perp()))
-        points.append((xi, d))
+        points.append(D2Point(x=xi, y=d))
     
     return points
 
 #TODO: think of the option to make these functions of MemberStress. Need for reference to endpoints makes in nontrivial.
 
 def forcesOnA(lstress: MemberStress, point_a: FrameJoint, point_b: FrameJoint) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
-    S_a = -lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
-    V_a = -lstress.V[0][1]   # and similar for other diagrams
-    M_a = -lstress.M[0][1]
+    S_a = -lstress.S[0].y  # S at A is the second value in the first tuple of the S diagram
+    V_a = -lstress.V[0].y   # and similar for other diagrams
+    M_a = -lstress.M[0].y
 
     dx = point_b.x - point_a.x
     dy = point_b.y - point_a.y
@@ -332,9 +332,9 @@ def forcesOnA(lstress: MemberStress, point_a: FrameJoint, point_b: FrameJoint) -
     return Fx_A, Fy_A, M_a
 
 def forcesOnB(lstress: MemberStress, point_a: FrameJoint, point_b: FrameJoint) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
-    S_b = lstress.S[-1][1]  # S at B is the second value in the last tuple of the S diagram
-    V_b = lstress.V[-1][1]
-    M_b = lstress.M[-1][1]
+    S_b = lstress.S[-1].y  # S at B is the second value in the last tuple of the S diagram
+    V_b = lstress.V[-1].y
+    M_b = lstress.M[-1].y
 
     dx = point_b.x - point_a.x
     dy = point_b.y - point_a.y

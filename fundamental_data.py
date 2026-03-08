@@ -61,6 +61,11 @@ class FrameMember:
     ptls: List[PositionedPointForce]
 
 @dataclass
+class D2Point:
+    x: float
+    y: float
+
+@dataclass
 class MemberStress:
     """
     MemberStress describes internal forces and maximal stress info for a beam.
@@ -78,9 +83,9 @@ class MemberStress:
         s_max: Maximal stress in the beam (magnitude or signed as appropriate for subsequent processing).
         c_max: Position along the beam length where the maximal stress occurs (distance from A; same units as point coordinates).
     """
-    S: List[Tuple[float, float]]
-    V: List[Tuple[float, float]]
-    M: List[Tuple[float, float]]
+    S: List[D2Point]
+    V: List[D2Point]
+    M: List[D2Point]
     s_max: float
     c_max: float
 
@@ -98,7 +103,7 @@ class MemberStrain:
     e: float
     theta_a: float
     theta_b: float
-    dc: List[Tuple[float, float]]
+    dc: List[D2Point]
 
 @dataclass
 class JointDeflection:

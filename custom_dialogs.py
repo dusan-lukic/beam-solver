@@ -14,6 +14,7 @@ import tkinter as tk
 from tkinter import simpledialog
 from typing import List, Tuple
 from frame_solver import MemberStress, MemberStrain
+from fundamental_data import D2Point
 from scene_hydrator import HydratedLine
 
 
@@ -109,13 +110,13 @@ class LineForceDialog(simpledialog.Dialog):
             self.line.point_b.point.y - self.line.point_a.point.y)
         
         # Function to plot a diagram on a canvas
-        def plot_diagram(canvas, values: List[Tuple[float, float]], title: str):
-            min_x = min(x for x, _ in values)
-            max_x = max(x for x, _ in values)
+        def plot_diagram(canvas, points: List[D2Point], title: str):
+            min_x = min(p.x for p in points)
+            max_x = max(p.x for p in points)
             x_scale = 800 / (max_x - min_x) if max_x > min_x else 1
 
-            min_v = min(v for _, v in values)
-            max_v = max(v for _, v in values)
+            min_v = min(p.y for p in points)
+            max_v = max(p.y for p in points)
             y_scale = 180 / (max_v - min_v) if max_v > min_v else 1
             y_offset = 100
             
@@ -123,13 +124,13 @@ class LineForceDialog(simpledialog.Dialog):
             canvas.create_line(0, y_offset, 800, y_offset, fill="black")
             
             # Plot points
-            points = []
-            for x, v in values:
-                px = (x - min_x) * x_scale
-                py = y_offset - (v - (min_v + max_v)/2) * y_scale
-                points.extend([px, py])
+            canvas_points = []
+            for p in points:
+                px = (p.x - min_x) * x_scale
+                py = y_offset - (p.y - (min_v + max_v)/2) * y_scale
+                canvas_points.extend([px, py])
             
-            canvas.create_line(*points, fill="blue", width=2)
+            canvas.create_line(canvas_points, fill="blue", width=2)
             
             # Title
             canvas.create_text(400, 10, text=title, anchor="n")
