@@ -235,6 +235,69 @@ class SimpleApp(tk.Tk):
             self.canvas.itemconfigure(self.line_ids_to_canvas_ids[line_id], fill = _color_from_smax(lstress.s_max))
 
 
+    def draw_piecewise_linear(self, thickness: float, color: str, start, end, points):
+        """Draw a piecewise linear curve by transforming the given points to fit between start and end.
+
+        Args:
+            thickness: Line thickness.
+            color: Line color.
+            start: Tuple (x, y) for the starting point in world coordinates.
+            end: Tuple (x, y) for the ending point in world coordinates.
+            points: List of [x, y] tuples representing the vertices of the curve in local coordinates.
+        """
+        if not points or len(points) < 2:
+            return
+
+        p_start = points[0]
+        p_end = points[-1]
+
+        # Vector in points
+        dx_p = p_end[0] - p_start[0]
+        dy_p = p_end[1] - p_start[1]
+        len_p = math.hypot(dx_p, dy_p)
+        if len_p == 0:
+            return
+
+        # Target vector
+        dx_t = end[0] - start[0]
+        dy_t = end[1] - start[1]
+        len_t = math.hypot(dx_t, dy_t)
+        if len_t == 0:
+            return
+
+        # Scale
+        scale = len_t / len_p
+
+        # Angles
+        angle_p = math.atan2(dy_p, dx_p)
+        angle_t = math.atan2(dy_t, dx_t)
+        angle_diff = angle_t - angle_p
+        cos_a = math.cos(angle_diff)
+        sin_a = math.sin(angle_diff)
+
+        # Transform each point
+        transformed = []
+        for px, py in points:
+            # Translate to origin
+            tx = px - p_start[0]
+            ty = py - p_start[1]
+            # Rotate
+            rx = tx * cos_a - ty * sin_a
+            ry = tx * sin_a + ty * cos_a
+            # Scale
+            rx *= scale
+            ry *= scale
+            # Translate to start
+            rx += start[0]
+            ry += start[1]
+            # Convert to canvas coordinates
+            cx, cy = self.world_to_canvas(rx, ry)
+            transformed.extend([cx, cy])
+
+        # Draw the line
+        self.canvas.create_line(*transformed, fill=color, width=thickness, smooth=False)
+
+
     def on_canvas_click(self, event):
         """Handle a click on the canvas and identify a point or line element.
 
