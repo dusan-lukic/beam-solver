@@ -18,12 +18,12 @@ import json
 # systems of equations, validating data for these purposes etc).
 
 @dataclass
-class PointLoad:
+class PointForce:
     Px: float
     Py: float
 
 @dataclass
-class UniformLoad:
+class UniformForce:
     qx: float
     qy: float
 
@@ -35,14 +35,14 @@ class Support:
     anch: str
 
 @dataclass
-class Point:
+class FrameJoint:
     id: str
     x: float
     y: float
-    loads: List[PointLoad]
+    loads: List[PointForce]
 
 @dataclass
-class Line:
+class FrameMember:
     id: str
     a: str
     b: str
@@ -53,17 +53,17 @@ class Line:
         A: float
         h: float
     bp: BeamProps
-    ul: Optional[UniformLoad]
+    ul: Optional[UniformForce]
     @dataclass
-    class PointLoadOnLine:
+    class PositionedPointForce:
         c: float
-        ptl: PointLoad
-    ptls: List[PointLoadOnLine]
+        ptl: PointForce
+    ptls: List[PositionedPointForce]
 
 @dataclass
-class LineStress:
+class MemberStress:
     """
-    LineStress describes internal forces and maximal stress info for a beam.
+    MemberStress describes internal forces and maximal stress info for a beam.
 
     Fields:
         S: Axial force diagram.
@@ -85,9 +85,9 @@ class LineStress:
     c_max: float
 
 @dataclass
-class LineStrain:
+class MemberStrain:
     """
-    LineStrain describes axial and angular strain of a beam.
+    MemberStrain describes axial and angular strain of a beam.
 
     Fields:
         e: Elongation of the centerline of the beam (positive means elongation, negative means shortening).
@@ -101,7 +101,7 @@ class LineStrain:
     dc: List[Tuple[float, float]]
 
 @dataclass
-class PointDeflection:
+class JointDeflection:
     d_x: float
     d_y: float
     d_t: float
@@ -117,15 +117,15 @@ class SupportReactions:
 
 @dataclass
 class Scene:
-    points: List[Point]
-    lines: List[Line]
+    points: List[FrameJoint]
+    lines: List[FrameMember]
     supports: List[Support]
 
 @dataclass
 class FrameSolution:
-    line_stresses: Dict[str, LineStress]
-    line_strains: Dict[str, LineStrain]
-    point_deflections: Dict[str, PointDeflection]
+    line_stresses: Dict[str, MemberStress]
+    line_strains: Dict[str, MemberStrain]
+    point_deflections: Dict[str, JointDeflection]
     support_reactions: Dict[str, SupportReactions]
 
 # beam props for few common beams
@@ -228,21 +228,21 @@ def parse_list(raw_list: List, element_parser: callable, list_name: str) -> List
         raise ValueError(f"'{list_name}' must be a list")
     return [element_parser(re) for re in raw_list]
 
-def parse_point_load(raw_load: dict) -> PointLoad:
+def parse_point_force(raw_load: dict) -> PointForce:
     if not isinstance(raw_load, dict):
-        raise ValueError("Point load must be an object")
-    return PointLoad(
+        raise ValueError("Point force must be an object")
+    return PointForce(
         Px = float(raw_load.get("Px")),
         Py = float(raw_load.get("Py")))
 
-def parse_point(raw_pt: dict) -> Point:
+def parse_frame_joint(raw_pt: dict) -> FrameJoint:
     if not isinstance(raw_pt, dict):
         raise ValueError("Point must be an object.")
-    return Point(
+    return FrameJoint(
         id = str(raw_pt["id"]),
         x = float(raw_pt["x"]),
         y = float(raw_pt["y"]),
-        loads = parse_list(raw_pt.get("loads", []), parse_point_load, "loads"))
+        loads = parse_list(raw_pt.get("loads", []), parse_point_force, "loads"))
 
 def parse_support(raw_support: dict) -> Support:
     if not isinstance(raw_support, dict):
@@ -253,39 +253,39 @@ def parse_support(raw_support: dict) -> Support:
         rot = bool(raw_support.get("rot")),
         anch = str(raw_support.get("anch")))
 
-def parse_uniform_load(raw_ul: dict) -> UniformLoad:
+def parse_uniform_force(raw_ul: dict) -> UniformForce:
     if not isinstance(raw_ul, dict):
-        raise ValueError("Uniform load must be an object")
-    return UniformLoad(
+        raise ValueError("Uniform force must be an object")
+    return UniformForce(
         qx = float(raw_ul.get("qx")),
         qy = float(raw_ul.get("qy")))
 
-def parse_point_load_on_line(raw_pll: dict) -> Line.PointLoadOnLine:
+def parse_positioned_point_force(raw_pll: dict) -> FrameMember.PositionedPointForce:
     if not isinstance(raw_pll, dict):
         raise ValueError("Point load on line must be an object")
-    return Line.PointLoadOnLine(
+    return FrameMember.PositionedPointForce(
         c = float(raw_pll.get("c")),
-        ptl = parse_point_load(raw_pll.get("ptl")))
+        ptl = parse_point_force(raw_pll.get("ptl")))
 
-def parse_beam_props(raw_bp: dict) -> Line.BeamProps:
+def parse_beam_props(raw_bp: dict) -> FrameMember.BeamProps:
     if not isinstance(raw_bp, dict):
         raise ValueError("Beam properties must be an object")
-    return Line.BeamProps(
+    return FrameMember.BeamProps(
         E = float(raw_bp.get("E")),
         I = float(raw_bp.get("I")),
         A = float(raw_bp.get("A")),
         h = float(raw_bp.get("h")))
 
-def parse_line(raw_line: dict) -> Line:
+def parse_frame_member(raw_line: dict) -> FrameMember:
     if not isinstance(raw_line, dict):
-        raise ValueError("Each line must be an object.")
-    return Line(
+        raise ValueError("Each member must be an object.")
+    return FrameMember(
         id = str(raw_line["id"]),
         a = str(raw_line["a"]),
         b = str(raw_line["b"]),
         bp = parse_beam_props(raw_line.get("bp")),
-        ul = parse_uniform_load(raw_line.get("ul")) if "ul" in raw_line and raw_line.get("ul") is not None else None,
-        ptls = parse_list(raw_line.get("ptls", []), parse_point_load_on_line, "ptls"))
+        ul = parse_uniform_force(raw_line.get("ul")) if "ul" in raw_line and raw_line.get("ul") is not None else None,
+        ptls = parse_list(raw_line.get("ptls", []), parse_positioned_point_force, "ptls"))
 
 def parse_txt_data(txt: str) -> Tuple[str, Scene]:
     if not txt: return "Text box is empty.", None

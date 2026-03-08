@@ -13,7 +13,7 @@ import math
 import tkinter as tk
 from tkinter import simpledialog
 from typing import List, Tuple
-from frame_solver import LineStress, LineStrain
+from frame_solver import MemberStress, MemberStrain
 from scene_hydrator import HydratedLine
 
 
@@ -91,12 +91,12 @@ class LineForceDialog(simpledialog.Dialog):
     """Dialog for visualizing axial/shear forces and moments along a line.
 
     Attributes:
-        line: the Line instance associated with the dialog
-        lstress: the LineStress instance for that line
-        lstrain: the LineStrain instance for that line
+        line: the FrameMember (hydrated) instance associated with the dialog
+        lstress: the MemberStress instance for that member
+        lstrain: the MemberStrain instance for that member
     """
 
-    def __init__(self, parent, line: HydratedLine, lstress: LineStress, lstrain: LineStrain):
+    def __init__(self, parent, line: HydratedLine, lstress: MemberStress, lstrain: MemberStrain):
         self.line = line
         self.lstress = lstress
         self.lstrain = lstrain

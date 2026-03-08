@@ -6,11 +6,11 @@
 import math
 import tkinter as tk
 from tkinter import Scrollbar, messagebox
-from typing import List
+from typing import List, Dict, Tuple
 from custom_dialogs import PointForceDialog, LineForceDialog
 from float_to_sig import float_to_str_sig
 from frame_solution_validator import validate_deflections, validate_equilibrium
-from fundamental_data import *
+from fundamental_data import FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, Scene, FrameSolution, SupportReactions, parse_txt_data, SAMPLE_DATA
 from scene_hydrator import build_hydrated_structures, HydratedScene
 from frame_solver import solve_scene, forcesOnA, forcesOnB
 
@@ -23,7 +23,7 @@ CANVAS_MARGIN_SIZE = 30
 POINT_DIAMETER = 8
 POINT_RADIUS = POINT_DIAMETER / 2.0
 
-def bounding_box(points: List[Point]):
+def bounding_box(points: List[FrameJoint]):
     xs = [p.x for p in points]
     ys = [p.y for p in points]
     minx = min(xs)
@@ -104,7 +104,7 @@ class SimpleApp(tk.Tk):
         return x, y
 
 
-    def update_canvas_transform_to_fit(self, points: List[Point]):
+    def update_canvas_transform_to_fit(self, points: List[FrameJoint]):
         self.update_idletasks()
         cw = self.canvas.winfo_width()
         ch = self.canvas.winfo_height()

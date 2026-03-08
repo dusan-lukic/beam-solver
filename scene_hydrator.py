@@ -1,8 +1,8 @@
 # LLM-generated
 # human reviewed
 
-from typing import List
-from fundamental_data import *
+from typing import List, Optional, Tuple
+from fundamental_data import FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, Scene, FrameSolution, SupportReactions
 from dataclasses import dataclass
 import math
 
@@ -22,12 +22,12 @@ class HydratedSupport:
 
 @dataclass
 class HydratedPoint:
-    point: Point
+    point: FrameJoint
     sup: Optional['HydratedSupport']
     lines_a: List['HydratedLine']
     lines_b: List['HydratedLine']
     
-    def __init__(self, point: Point, sup: Optional['HydratedSupport'] = None):
+    def __init__(self, point: FrameJoint, sup: Optional['HydratedSupport'] = None):
         self.point = point
         self.sup = sup
         self.lines_a = []
@@ -42,11 +42,11 @@ class HydratedPoint:
 
 @dataclass
 class HydratedLine:
-    line: Line
+    line: FrameMember
     point_a: HydratedPoint
     point_b: HydratedPoint
 
-    def __init__(self, line: Line, point_a: HydratedPoint, point_b: HydratedPoint):
+    def __init__(self, line: FrameMember, point_a: HydratedPoint, point_b: HydratedPoint):
         self.line = line
         self.point_a = point_a
         self.point_b = point_b

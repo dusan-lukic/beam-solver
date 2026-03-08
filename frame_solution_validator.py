@@ -4,7 +4,7 @@
 
 import math
 from scene_hydrator import HydratedScene
-from fundamental_data import FrameSolution, PointDeflection
+from fundamental_data import FrameSolution, JointDeflection
 from frame_solver import forcesOnA, forcesOnB
 
 
@@ -60,10 +60,10 @@ def validate_equilibrium(scene: HydratedScene, solution: FrameSolution):
 def validate_deflections(scene: HydratedScene, solution: FrameSolution):
     for hl in scene.lines:
         lstrain = solution.line_strains[hl.line.id]
-        a_def: PointDeflection = solution.point_deflections[hl.point_a.point.id]
+        a_def: JointDeflection = solution.point_deflections[hl.point_a.point.id]
         x_a = hl.point_a.point.x + a_def.d_x
         y_a = hl.point_a.point.y + a_def.d_y
-        b_def: PointDeflection = solution.point_deflections[hl.point_b.point.id]
+        b_def: JointDeflection = solution.point_deflections[hl.point_b.point.id]
         x_b = hl.point_b.point.x + b_def.d_x
         y_b = hl.point_b.point.y + b_def.d_y
 

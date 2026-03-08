@@ -1,10 +1,11 @@
 # LLM-generated
 # human reviewed
 
-from typing import List
-from fundamental_data import *
+from typing import List, Dict, Tuple, Optional
+from fundamental_data import FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, FrameSolution, SupportReactions, Scene
 import numpy as np
-from scene_hydrator import *
+import math
+from scene_hydrator import HydratedScene, HydratedLine
 
 #TODO: document perf optimization oportunities
 #TODO: encapsulate with underscore convention + linter
@@ -163,10 +164,10 @@ def assemble_system(scene: HydratedScene, var_ptrs: VariablePositions) -> Tuple[
 
 
 def decode_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) -> FrameSolution:
-    # Points -> PointDeflection
+    # Points -> JointDeflection
     point_deflections = {}
     for hp in scene.points:
-        point_deflections[hp.point.id] = PointDeflection(
+        point_deflections[hp.point.id] = JointDeflection(
             d_x=x[var_ptrs.joint_vars[hp.point.id]],
             d_y=x[var_ptrs.joint_vars[hp.point.id] + 1],
             d_t=x[var_ptrs.joint_vars[hp.point.id] + 2])
@@ -186,7 +187,7 @@ def decode_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) 
             Rm = x[var_ptrs.support_vars[hs.support.anch] + offset]
         support_reactions[hs.support.anch] = SupportReactions(R_x=Rx, R_y=Ry, R_m=Rm)
 
-    # Lines -> LineStress and LineStrain
+    # Lines -> MemberStress and MemberStrain
     line_stresses = {}
     line_strains = {}
     for hl in scene.lines:
@@ -206,7 +207,7 @@ def decode_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) 
         Bp = -Xb*sin_a + Yb*cos_a
         (x_max, M_bnd_max) = maxPosAndBendingMoment(hl, Mb, Bp)
 
-        lstress = LineStress(
+        lstress = MemberStress(
             S = axial_force_diagram(hl, Bx),
             V = shear_force_diagram(hl, Bp),
             M = bending_moment_diagram(hl, Mb, Bp),
@@ -214,7 +215,7 @@ def decode_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) 
             c_max = x_max)
 
         # strains
-        lstrain = LineStrain(
+        lstrain = MemberStrain(
             e = Bx/AE + hl.q_ax()*l/2/AE + sum(p*c/AE for (c, p) in hl.p_ax())/l,
             theta_a = - Mb*l/2/EI - Bp*(l**2)/3/EI - sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp()) - hl.q_perp()*(l**3)/8/EI,
             theta_b =   Mb*l/2/EI + Bp*(l**2)/6/EI + sum(p*(c**3)        /6/EI/l for (c, p) in hl.p_perp()) + hl.q_perp()*(l**3)/24/EI,
@@ -311,9 +312,9 @@ def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float
     
     return points
 
-#TODO: think of the option to make these unctions of LineStress. Need for reference to endpoints makes in nontrivial.
+#TODO: think of the option to make these functions of MemberStress. Need for reference to endpoints makes in nontrivial.
 
-def forcesOnA(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+def forcesOnA(lstress: MemberStress, point_a: FrameJoint, point_b: FrameJoint) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
     S_a = -lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
     V_a = -lstress.V[0][1]   # and similar for other diagrams
     M_a = -lstress.M[0][1]
@@ -330,7 +331,7 @@ def forcesOnA(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tupl
 
     return Fx_A, Fy_A, M_a
 
-def forcesOnB(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+def forcesOnB(lstress: MemberStress, point_a: FrameJoint, point_b: FrameJoint) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
     S_b = lstress.S[-1][1]  # S at B is the second value in the last tuple of the S diagram
     V_b = lstress.V[-1][1]
     M_b = lstress.M[-1][1]
