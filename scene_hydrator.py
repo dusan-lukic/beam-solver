@@ -57,13 +57,13 @@ class HydratedLine:
     
     def total_load_y(self) -> float:
         return self.line.ul.qy * self.length() if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Py for ptl in self.line.ptls) if self.line.ptls else 0.
+            + sum(ptl.ptl.Py for ptl in self.line.ptls) if self.line.ptls else 0.0
     
-    def total_load_moment_wrt_B(self) -> float:
-        return self.line.ul.qx * self.length() * self.y_length() / 2 if self.line.ul else 0.0 \
-            - self.line.ul.qy * self.length() * self.x_length() / 2 if self.line.ul else 0.0 \
-            + sum(ptl.ptl.Px * (1 - ptl.c/self.length()) * self.y_length() for ptl in self.line.ptls) if self.line.ptls else 0.0 \
-            - sum(ptl.ptl.Py * (1 - ptl.c/self.length()) * self.x_length() for ptl in self.line.ptls) if self.line.ptls else 0.0
+    def total_load_moment_wrt_A(self) -> float:
+        return -self.line.ul.qx * self.length() * self.y_length() / 2 if self.line.ul else 0.0 \
+            + self.line.ul.qy * self.length() * self.x_length() / 2 if self.line.ul else 0.0 \
+            - sum(ptl.ptl.Px * ptl.c/self.length() * self.y_length() for ptl in self.line.ptls) if self.line.ptls else 0.0 \
+            + sum(ptl.ptl.Py * ptl.c/self.length() * self.x_length() for ptl in self.line.ptls) if self.line.ptls else 0.0
     
     def x_length(self) -> float:
         return self.point_b.point.x - self.point_a.point.x

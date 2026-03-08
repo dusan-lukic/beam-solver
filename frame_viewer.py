@@ -223,6 +223,7 @@ class SimpleApp(tk.Tk):
     def draw_solution(self, solution: FrameSolution):
         # Helper to compute color from s_max: 0 -> green, 1e8+ -> red
         s_max_max_abs = max(abs(lstress.s_max) for lstress in solution.line_stresses.values())
+        s_max_max_abs = max(s_max_max_abs, 1)  # avoid division by zero
         def _color_from_smax(s_max: float) -> str:
             t = max(0.0, min(1.0, abs(s_max) / s_max_max_abs))  # normalize and clamp to [0, 1]
             r = int(255 * t)

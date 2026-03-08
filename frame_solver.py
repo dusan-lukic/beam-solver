@@ -27,7 +27,7 @@ def solve_scene(scene: HydratedScene) -> FrameSolution:
     x = np.linalg.solve(A, b)
     
     # Build and return a FrameSolution derived from x and hydrated structures
-    solution: FrameSolution = build_frame_solution(scene, x, var_ptrs)
+    solution: FrameSolution = decode_frame_solution(scene, x, var_ptrs)
     validate_equilibrium(scene, solution)
     return solution
 
@@ -88,13 +88,13 @@ def assemble_system(scene: HydratedScene, var_ptrs: VariablePositions) -> Tuple[
         for m in hp.lines_b:
             A[eq_idx, var_ptrs.member_vars[m.line.id] + 2] = 1
         for m in hp.lines_a:
-            A[eq_idx, var_ptrs.member_vars[m.line.id]] = -m.y_length()
-            A[eq_idx, var_ptrs.member_vars[m.line.id] + 1] = m.x_length()
+            A[eq_idx, var_ptrs.member_vars[m.line.id]] = m.y_length()
+            A[eq_idx, var_ptrs.member_vars[m.line.id] + 1] = -m.x_length()
             A[eq_idx, var_ptrs.member_vars[m.line.id] + 2] = -1
         if (hp.sup and hp.sup.support.rot):
             offset = (1 if hp.sup.support.hor else 0) + (1 if hp.sup.support.ver else 0)
             A[eq_idx, var_ptrs.support_vars[hp.sup.support.anch] + offset] = -1
-        b[eq_idx] = sum(l.total_load_moment_wrt_B() for l in hp.lines_a) # nothing else because point loads on joints don't support moments
+        b[eq_idx] = sum(l.total_load_moment_wrt_A() for l in hp.lines_a) # nothing else because point loads on joints don't support moments
         eq_idx += 1
     
     # --- Compatibility equations (3 per line) ---
@@ -164,15 +164,7 @@ def assemble_system(scene: HydratedScene, var_ptrs: VariablePositions) -> Tuple[
     return A, b
 
 
-def build_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) -> FrameSolution:
-    """
-    Produce a FrameSolution from solved system variable vector `x` and hydrated model
-    objects.
-
-    For each hydrated object this creates a corresponding entry in the output
-    dictionaries (point_deflections, line_stresses_and_strains, support_reactions).
-    """
-
+def decode_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) -> FrameSolution:
     # Points -> PointDeflection
     point_deflections = {}
     for hp in scene.points:
@@ -322,9 +314,9 @@ def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float
     return points
 
 def forcesOnA(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
-    S_a = lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
-    V_a = lstress.V[0][1]   # and similar for other diagrams
-    M_a = lstress.M[0][1]
+    S_a = -lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
+    V_a = -lstress.V[0][1]   # and similar for other diagrams
+    M_a = -lstress.M[0][1]
 
     dx = point_b.x - point_a.x
     dy = point_b.y - point_a.y
@@ -353,20 +345,23 @@ def forcesOnB(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tupl
     Fx_B = S_b * cos_a - V_b * sin_a
     Fy_B = S_b * sin_a + V_b * cos_a
 
-    return -Fx_B, -Fy_B, -M_b
+    return Fx_B, Fy_B, M_b
 
 def validate_equilibrium(scene: HydratedScene, solution: FrameSolution):
     for hl in scene.lines:
         lstress = solution.line_stresses[hl.line.id]
-        total_ax = lstress.S[0][1] - lstress.S[-1][1] + sum(p_ax[1] for p_ax in hl.p_ax()) + hl.q_ax()*hl.length()
+        total_ax = lstress.S[-1][1] - lstress.S[0][1] + sum(p_ax[1] for p_ax in hl.p_ax()) + hl.q_ax()*hl.length()
         if abs(total_ax) > 1:
             print(f"Equilibrium validation failed for line {hl.line.id}: S at A + S at B + sum(p_ax) + q_ax*length should be 0 but is {total_ax}")
         
-        total_perp = lstress.V[0][1] - lstress.V[-1][1] + sum(p_perp[1] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()
+        total_perp = lstress.V[-1][1] - lstress.V[0][1] + sum(p_perp[1] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()
         if abs(total_perp) > 1:
             print(f"Equilibrium validation failed for line {hl.line.id}: V at A + V at B + sum(p_perp) + q_perp*length should be 0 but is {total_perp}")
         
-        total_m_wrt_A = lstress.M[0][1] - lstress.M[-1][1] + sum(p_perp[1]*p_perp[0] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()*hl.length()/2
+        total_m_wrt_A = lstress.M[-1][1] - lstress.M[0][1] \
+            + sum(p_perp[1]*p_perp[0] for p_perp in hl.p_perp()) \
+            + hl.q_perp()*hl.length()*hl.length()/2 \
+            + lstress.V[-1][1]*hl.length()
         if abs(total_m_wrt_A) > 1:
             print(f"Equilibrium validation failed for line {hl.line.id}: M at A + M at B + sum(p_perp*c) + q_perp*length^2/2 should be 0 but is {total_m_wrt_A}")
     

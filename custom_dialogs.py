@@ -56,6 +56,7 @@ class PointForceDialog(simpledialog.Dialog):
 
         # draw force and momentarrows
         mmax = max([abs(m) for _, (_, _, m) in self.forces.items()])
+        mmax = max(mmax, 1.0)  # avoid zero division
         for lbl, (fx, fy, m) in self.forces.items():
             mag = math.hypot(fx, fy)
             if mag == 0:

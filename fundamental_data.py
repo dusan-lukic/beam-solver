@@ -66,10 +66,15 @@ class LineStress:
     LineStress describes internal forces and maximal stress info for a beam.
 
     Fields:
-        S: Axial force diagram. Positive along the beam in the A-to-B direction.
-        V: Shear force diagram. Positive upwards when the beam is horizontal and A is on the left.
-        P_b: Perpendicular force at endpoint B. Positive upwards when the beam is horizontal and A is on the left.
-        M: Bending moment iagram. Positive CCW.
+        S: Axial force diagram.
+           At any point 'c', the force is considered to act on the 'right' face of the A-c portion of the beam.
+           Positive along the beam in the A-to-B direction.
+        V: Shear force diagram.
+           At any point 'c', the force is considered to act on the 'right' face of the A-c portion of the beam.
+           Positive upwards when the beam is horizontal and A is on the left.
+        M: Bending moment iagram.
+           At any point 'c', the force is considered to act on the 'right' face of the A-c portion of the beam.
+           Positive CCW.
         s_max: Maximal stress in the beam (magnitude or signed as appropriate for subsequent processing).
         c_max: Position along the beam length where the maximal stress occurs (distance from A; same units as point coordinates).
     """
@@ -97,14 +102,6 @@ class LineStrain:
 
 @dataclass
 class PointDeflection:
-    """
-    PointDeflection contains displacement and rotation of a joint.
-
-    Fields:
-        d_x: Deflection in the global x direction.
-        d_y: Deflection in the global y direction.
-        d_t: Angular deflection (rotation) at the point, positive CCW (radians).
-    """
     d_x: float
     d_y: float
     d_t: float
@@ -112,12 +109,7 @@ class PointDeflection:
 @dataclass
 class SupportReactions:
     """
-    SupportReactions contains reaction forces/moment at a support.
-
-    Fields:
-        R_x: Reaction force on the joint in x direction (positive in global +x).
-        R_y: Reaction force on the joint in y direction (positive in global +y).
-        R_m: Reaction moment (positive CCW) by which the support acts on the attached joint.
+    Forces and moments by which *support acts on its anchor point*.
     """
     R_x: float
     R_y: float
