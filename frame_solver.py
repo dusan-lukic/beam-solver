@@ -27,9 +27,7 @@ def solve_scene(scene: HydratedScene) -> FrameSolution:
     x = np.linalg.solve(A, b)
     
     # Build and return a FrameSolution derived from x and hydrated structures
-    solution: FrameSolution = decode_frame_solution(scene, x, var_ptrs)
-    validate_equilibrium(scene, solution)
-    return solution
+    return decode_frame_solution(scene, x, var_ptrs)
 
 
 def assign_variable_positions(scene: HydratedScene) -> VariablePositions:
@@ -217,7 +215,7 @@ def decode_frame_solution(scene: HydratedScene, x, var_ptrs: VariablePositions) 
 
         # strains
         lstrain = LineStrain(
-            e = Bx*l/AE + (l**2)/2/AE*hl.q_ax() + sum(p*c/AE for (c, p) in hl.p_ax()),
+            e = Bx/AE + hl.q_ax()*l/2/AE + sum(p*c/AE for (c, p) in hl.p_ax())/l,
             theta_a = - Mb*l/2/EI - Bp*(l**2)/3/EI - sum(p*(c**2)*(3*l-c)/6/EI/l for (c, p) in hl.p_perp()) - hl.q_perp()*(l**3)/8/EI,
             theta_b =   Mb*l/2/EI + Bp*(l**2)/6/EI + sum(p*(c**3)        /6/EI/l for (c, p) in hl.p_perp()) + hl.q_perp()*(l**3)/24/EI,
             dc = deflection_curve(hl, Mb, Bp))
@@ -313,6 +311,8 @@ def deflection_curve(hl: HydratedLine, Mb: float, Bp: float) -> List[Tuple[float
     
     return points
 
+#TODO: think of the option to make these unctions of LineStress. Need for reference to endpoints makes in nontrivial.
+
 def forcesOnA(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
     S_a = -lstress.S[0][1]  # S at A is the second value in the first tuple of the S diagram
     V_a = -lstress.V[0][1]   # and similar for other diagrams
@@ -346,51 +346,3 @@ def forcesOnB(lstress: LineStress, point_a: Point, point_b: Point) -> Tuple[Tupl
     Fy_B = S_b * sin_a + V_b * cos_a
 
     return Fx_B, Fy_B, M_b
-
-def validate_equilibrium(scene: HydratedScene, solution: FrameSolution):
-    for hl in scene.lines:
-        lstress = solution.line_stresses[hl.line.id]
-        total_ax = lstress.S[-1][1] - lstress.S[0][1] + sum(p_ax[1] for p_ax in hl.p_ax()) + hl.q_ax()*hl.length()
-        if abs(total_ax) > 1:
-            print(f"Equilibrium validation failed for line {hl.line.id}: S at A + S at B + sum(p_ax) + q_ax*length should be 0 but is {total_ax}")
-        
-        total_perp = lstress.V[-1][1] - lstress.V[0][1] + sum(p_perp[1] for p_perp in hl.p_perp()) + hl.q_perp()*hl.length()
-        if abs(total_perp) > 1:
-            print(f"Equilibrium validation failed for line {hl.line.id}: V at A + V at B + sum(p_perp) + q_perp*length should be 0 but is {total_perp}")
-        
-        total_m_wrt_A = lstress.M[-1][1] - lstress.M[0][1] \
-            + sum(p_perp[1]*p_perp[0] for p_perp in hl.p_perp()) \
-            + hl.q_perp()*hl.length()*hl.length()/2 \
-            + lstress.V[-1][1]*hl.length()
-        if abs(total_m_wrt_A) > 1:
-            print(f"Equilibrium validation failed for line {hl.line.id}: M at A + M at B + sum(p_perp*c) + q_perp*length^2/2 should be 0 but is {total_m_wrt_A}")
-    
-    for p in scene.points:
-        total_Fx = 0.0
-        total_Fy = 0.0
-        total_M = 0.0
-        for l in p.lines_a:
-            lstress = solution.line_stresses[l.line.id]
-            Fx, Fy, M = forcesOnA(lstress, l.point_a.point, l.point_b.point)
-            total_Fx -= Fx
-            total_Fy -= Fy
-            total_M -= M
-        for l in p.lines_b:
-            lstress = solution.line_stresses[l.line.id]
-            Fx, Fy, M = forcesOnB(lstress, l.point_a.point, l.point_b.point)
-            total_Fx -= Fx
-            total_Fy -= Fy
-            total_M -= M
-        for load in p.point.loads:
-            total_Fx += load.Px
-            total_Fy += load.Py
-        if p.sup is not None:
-            sr = solution.support_reactions[p.sup.support.anch]
-            total_Fx += sr.R_x
-            total_Fy += sr.R_y
-            total_M += sr.R_m
-        
-        if (abs(total_Fx) > 1 or abs(total_Fy) > 1 or abs(total_M) > 1):
-            print(f"Equilibrium validation failed at point {p.point.id}: total_Fx={total_Fx}, total_Fy={total_Fy}, total_M={total_M}")
-
-    pass

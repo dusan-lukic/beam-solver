@@ -9,6 +9,7 @@ from tkinter import Scrollbar, messagebox
 from typing import List
 from custom_dialogs import PointForceDialog, LineForceDialog
 from float_to_sig import float_to_str_sig
+from frame_solution_validator import validate_deflections, validate_equilibrium
 from fundamental_data import *
 from scene_hydrator import build_hydrated_structures, HydratedScene
 from frame_solver import solve_scene, forcesOnA, forcesOnB
@@ -296,6 +297,9 @@ class SimpleApp(tk.Tk):
         
         self.solution: FrameSolution = solve_scene(self.scene)
         self.draw_solution(self.solution)
+        
+        validate_equilibrium(self.scene, self.solution)
+        validate_deflections(self.scene, self.solution)
 
 
 if __name__ == "__main__":
