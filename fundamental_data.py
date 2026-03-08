@@ -65,6 +65,22 @@ class D2Point:
     x: float
     y: float
 
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    # Defines behavior for: Vector + Vector
+    def __add__(self, other: 'D2Point'):
+        return D2Point(self.x + other.x, self.y + other.y)
+
+    # Defines behavior for: Vector - Vector
+    def __sub__(self, other: 'D2Point'):
+        return D2Point(self.x - other.x, self.y - other.y)
+
+    # Defines behavior for: Vector * Scalar (Multiplication)
+    def __mul__(self, scalar):
+        return D2Point(self.x * scalar, self.y * scalar)
+
 @dataclass
 class MemberStress:
     """

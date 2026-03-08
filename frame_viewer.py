@@ -6,13 +6,14 @@
 import math
 import tkinter as tk
 from tkinter import Scrollbar, messagebox
-from typing import List, Dict, Tuple
+from typing import List, Dict
 from custom_dialogs import PointForceDialog, LineForceDialog
 from float_to_sig import float_to_str_sig
 from frame_solution_validator import validate_deflections, validate_equilibrium
-from fundamental_data import FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, Scene, FrameSolution, SupportReactions, parse_txt_data, SAMPLE_DATA
+from fundamental_data import D2Point, FrameJoint, FrameMember, PointForce, UniformForce, Support, MemberStress, MemberStrain, JointDeflection, Scene, FrameSolution, SupportReactions, parse_txt_data, SAMPLE_DATA
 from scene_hydrator import build_hydrated_structures, HydratedScene
 from frame_solver import solve_scene, forcesOnA, forcesOnB
+import numpy as np
 
 
 # ------------------------
@@ -160,7 +161,7 @@ class SimpleApp(tk.Tk):
         for ln in self.scene.lines:
             x1, y1 = self.world_to_canvas(ln.point_a.point.x, ln.point_a.point.y)
             x2, y2 = self.world_to_canvas(ln.point_b.point.x, ln.point_b.point.y)
-            self.line_ids_to_canvas_ids[ln.line.id] = self.canvas.create_line(x1, y1, x2, y2, fill="black", width=6)
+            self.line_ids_to_canvas_ids[ln.line.id] = self.canvas.create_line(x1, y1, x2, y2, fill="black", width=2)
 
             # label near middle with small perpendicular offset
             mx = (x1 + x2) / 2.0
@@ -221,81 +222,71 @@ class SimpleApp(tk.Tk):
             self.canvas.create_text(lab_x, lab_y, text=lab, anchor="w", fill="black")
 
 
-    def draw_solution(self, solution: FrameSolution):
+    def draw_solution(self):
         # Helper to compute color from s_max: 0 -> green, 1e8+ -> red
-        s_max_max_abs = max(abs(lstress.s_max) for lstress in solution.line_stresses.values())
+        s_max_max_abs = max(abs(lstress.s_max) for lstress in self.solution.line_stresses.values())
         s_max_max_abs = max(s_max_max_abs, 1)  # avoid division by zero
         def _color_from_smax(s_max: float) -> str:
             t = max(0.0, min(1.0, abs(s_max) / s_max_max_abs))  # normalize and clamp to [0, 1]
             r = int(255 * t)
             g = int(255 * (1.0 - t))
             return f"#{r:02x}{g:02x}00"
+        
+        dc_exaggeration_factor = 100.0
+        jt_exaggeration_factor = 100.0
 
-        for line_id, lstress in solution.line_stresses.items():
-            self.canvas.itemconfigure(self.line_ids_to_canvas_ids[line_id], fill = _color_from_smax(lstress.s_max))
+        for line in self.scene.lines:
+            a_def = self.solution.point_deflections[line.point_a.point.id]
+            a = D2Point(line.point_a.point.x + a_def.d_x * jt_exaggeration_factor,
+                        line.point_a.point.y + a_def.d_y * jt_exaggeration_factor)
+            b_def = self.solution.point_deflections[line.point_b.point.id]
+            b = D2Point(line.point_b.point.x + b_def.d_x * jt_exaggeration_factor,
+                        line.point_b.point.y + b_def.d_y * jt_exaggeration_factor)
+            
+            self.draw_piecewise_linear(
+                thickness=4,
+                color=_color_from_smax(self.solution.line_stresses[line.line.id].s_max),
+                start=a,
+                end=b,
+                points=self.solution.line_strains[line.line.id].dc,
+                exaggeration_factor=dc_exaggeration_factor)
 
 
-    def draw_piecewise_linear(self, thickness: float, color: str, start, end, points):
+    def draw_piecewise_linear(self, thickness: float, color: str, start: D2Point, end: D2Point, points: List[D2Point], exaggeration_factor: float):
         """Draw a piecewise linear curve by transforming the given points to fit between start and end.
 
         Args:
             thickness: Line thickness.
             color: Line color.
-            start: Tuple (x, y) for the starting point in world coordinates.
-            end: Tuple (x, y) for the ending point in world coordinates.
-            points: List of [x, y] tuples representing the vertices of the curve in local coordinates.
+            start: (x, y) for the starting point in world coordinates.
+            end: (x, y) for the ending point in world coordinates.
+            points: List of [x, y] representing the vertices of the curve in local coordinates.
+            exaggeration_factor: Multiplier for the local coordinates to exaggerate deflections.            
         """
-        if not points or len(points) < 2:
-            return
+        # exaggerate deflection curve
+        exaggerated_points = [D2Point(p.x, p.y * exaggeration_factor) for p in points]
 
-        p_start = points[0]
-        p_end = points[-1]
+        # find transformation matrix for rotation and scaling. It will not handle translation.
+        point_vector = exaggerated_points[-1] - exaggerated_points[0]
+        target_vector = end - start
+        pt_norm = point_vector.x**2 + point_vector.y**2
+        a = (target_vector.x * point_vector.x + target_vector.y * point_vector.y) / pt_norm
+        b = (target_vector.y * point_vector.x - target_vector.x * point_vector.y) / pt_norm
+        trans_mat = np.array([[a, -b],
+                              [b,  a]])
 
-        # Vector in points
-        dx_p = p_end[0] - p_start[0]
-        dy_p = p_end[1] - p_start[1]
-        len_p = math.hypot(dx_p, dy_p)
-        if len_p == 0:
-            return
-
-        # Target vector
-        dx_t = end[0] - start[0]
-        dy_t = end[1] - start[1]
-        len_t = math.hypot(dx_t, dy_t)
-        if len_t == 0:
-            return
-
-        # Scale
-        scale = len_t / len_p
-
-        # Angles
-        angle_p = math.atan2(dy_p, dx_p)
-        angle_t = math.atan2(dy_t, dx_t)
-        angle_diff = angle_t - angle_p
-        cos_a = math.cos(angle_diff)
-        sin_a = math.sin(angle_diff)
-
-        # Transform each point
-        transformed = []
-        for px, py in points:
-            # Translate to origin
-            tx = px - p_start[0]
-            ty = py - p_start[1]
-            # Rotate
-            rx = tx * cos_a - ty * sin_a
-            ry = tx * sin_a + ty * cos_a
-            # Scale
-            rx *= scale
-            ry *= scale
-            # Translate to start
-            rx += start[0]
-            ry += start[1]
-            # Convert to canvas coordinates
-            cx, cy = self.world_to_canvas(rx, ry)
-            transformed.extend([cx, cy])
+        # apply transformation and translation
+        transformed_dc: List[List[float]] = []
+        for p in exaggerated_points:
+            p_orig = p - exaggerated_points[0]  # translate to origin for rotation/scaling
+            p_transformed = trans_mat @ np.array([p_orig.x, p_orig.y])  # rotate and scale
+            p_final_x = p_transformed[0] + start.x
+            p_final_y = p_transformed[1] + start.y
+            cx, cy = self.world_to_canvas(p_final_x, p_final_y)
+            transformed_dc.extend([cx, cy])
 
         # Draw the line
-        self.canvas.create_line(*transformed, fill=color, width=thickness, smooth=False)
+        self.canvas.create_line(*transformed_dc, fill=color, width=thickness, smooth=False)
 
 
     def on_canvas_click(self, event):
@@ -359,7 +350,7 @@ class SimpleApp(tk.Tk):
             return
         
         self.solution: FrameSolution = solve_scene(self.scene)
-        self.draw_solution(self.solution)
+        self.draw_solution()
         
         validate_equilibrium(self.scene, self.solution)
         validate_deflections(self.scene, self.solution)
